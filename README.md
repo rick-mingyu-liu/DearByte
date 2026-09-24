@@ -143,6 +143,8 @@ tools/bakeoff.ts         persona bake-off
 tools/inspect-wechat.swift  read-only WeChat accessibility probe
 docs/how-it-works.md     start here: how the whole system works
 docs/plan.md             plan: decisions, status, milestones
+docs/improvements.md     what could be better, in rough order
+docs/film/shot-list.md   the 30-second video, shot by shot
 docs/                    provenance and design notes
 ```
 

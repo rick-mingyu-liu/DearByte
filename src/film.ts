@@ -13,7 +13,7 @@ const gold = color(93);
 
 const clock = (now: Date) => dim(now.toLocaleTimeString("zh-CN", { hour12: false, hour: "2-digit", minute: "2-digit" }));
 
-/** "用户周五有面试" → "Rick 周五有面试". Facts are stored about 「用户」. */
+/** "用户周五有面试" → "Alex 周五有面试". Facts are stored about 「用户」. */
 export function aboutName(value: string, name: string): string {
   if (!value.startsWith("用户")) return value;
   const rest = value.slice(2);

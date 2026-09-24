@@ -90,7 +90,7 @@ export function recentPhrases(history: StoredMessage[]): string[] {
 }
 
 /**
- * How the user asked 小拜 to talk (「叫我瑞克」「别叫我宝宝」): standing rules
+ * How the user asked 小拜 to talk (「叫我 Alex」「别叫我宝宝」): standing rules
  * learned from feedback, placed late in the prompt where they're followed best.
  */
 function styleSection(facts: Fact[]): string | null {

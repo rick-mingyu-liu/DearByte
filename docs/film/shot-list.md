@@ -52,10 +52,10 @@ The caption hides "who" until the reveal. That gap is the twist.
 ## Backup ideas (if the main one fails)
 
 - **The 3 p.m. goodnight.** Say 「晚安啦」 in the afternoon. She already answered 「下午两点半说晚安，你这是刚下夜班啊」 ("goodnight at 2:30 p.m.? just off the night shift?"). It's easy to get again and is a good funny beat.
-- **The name.** 「叫我瑞克就行」 → 「行，瑞克 / 那之前叫你半天小乖，白叫了[白眼]」 ("ok 瑞克 / so all that 小乖 was wasted [eye-roll]"). A cute first-meeting beat for a longer cut.
+- **The name.** 「叫我 Alex 就行」 → 「行，Alex / 那之前叫你半天小乖，白叫了[白眼]」 ("ok Alex / so all that 小乖 was wasted [eye-roll]"). A cute first-meeting beat for a longer cut.
 - **The lonely line.** 「可现实中没女生跟我这样聊天」 ("no girl in real life talks to me like this"). The most sincere beat we have. It's better for a longer video than for the 30 s cut.
 
 ## Privacy check before posting
 
 - Crop out the Mac's menu bar, other chats in WeChat's list, and your real account name.
-- `--film` labels your messages with the **first** name in `data/contacts.json` (now 「Rick」). Put the name you want on camera first. The WeChat chat title shows too (「张三」). Rename the chat's remark to something you're happy to show, and add the new name to `data/contacts.json` and restart the runner first so 小拜 keeps replying.
+- `--film` labels your messages with the **first** name in `data/contacts.json` (your own name, if that's what you put first). Put the name you want on camera first. The WeChat chat title shows too. Rename the chat's remark to something you're happy to show, and add the new name to `data/contacts.json` and restart the runner first so 小拜 keeps replying.

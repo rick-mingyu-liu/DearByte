@@ -43,7 +43,7 @@ Here is what happens when you send 「今天好累」 ("so tired today") at 21:0
 
 | # | Layer | What happens | Time |
 |---|---|---|---|
-| 1 | **WeChat** | Your phone sends it to Tencent. WeChat on 小拜's Mac shows a new row, `RickSaid:今天好累`, using your WeChat nickname. | under 1 s |
+| 1 | **WeChat** | Your phone sends it to Tencent. WeChat on 小拜's Mac shows a new row, `AlexSaid:今天好累`, using your WeChat nickname. | under 1 s |
 | 2 | **Helper** (`main.swift`) | Once a second the runner asks "what's in the chat?". The helper reads the chat title and every row title through Accessibility, and returns `{chat, rows}`. | ~50 ms |
 | 3 | **Channel** (`channel.ts`) | Checks the open chat is one of your names in `contacts.json`, or it replies to nobody. Lines the new snapshot up with the last one; the extra row at the bottom is new. Parses it as text from you. If a second person ever speaks, it's a group chat, so it pauses. | instant |
 | 4 | **Reply loop** (`reply-loop.ts`) | Waits 1.5 s for more messages, so 「今天好累」「不想动」 become one turn. If 小拜 is already answering, the new message waits its turn. | 1.5 s |
@@ -87,7 +87,7 @@ Then it fills in the text, presses Return, and confirms that a new `MeSaid:<text
 
 **Photos.** WeChat 3.8.4 saves received photos as ordinary JPEGs in a folder for each chat. When a photo row appears, the runner picks the newest new file in that one folder. A photo sent twice is a hard link to the old file with an old date, which is why the check uses the later of the two file timestamps.
 
-**Who 小拜 talks to.** `data/contacts.json` (gitignored) lists the chat, with every name it might show. So when a remark changes, as 「张三」 → 「Rick」 did, replies keep going. Only one contact is supported today. Several would need separate memory per person and a way to switch chats.
+**Who 小拜 talks to.** `data/contacts.json` (gitignored) lists the chat, with every name it might show. So when a remark changes, as 「张三」 → 「Alex」 might, replies keep going. Only one contact is supported today. Several would need separate memory per person and a way to switch chats.
 
 **What can't be done in the background.** WeChat's downloaded sticker packs are encrypted, and the sticker panel only works with a real click while WeChat is in front. So 小拜 uses WeChat's text emoji codes (`[捂脸]` `[旺柴]`), which arrive as pictures on the phone. Stickers are planned for a Mac dedicated to 小拜.
 
@@ -119,7 +119,7 @@ The system prompt is built in this order. The stable parts come first, so DeepSe
 | Memory | SQLite | The facts 小拜 remembers (section 4), marked as records, not instructions. |
 | 更早聊过的 | rolling summary | What you talked about before the recent window. |
 | Safety | `prompts/safety.zh-CN.md` | Only in a crisis: take it seriously, ask if you're safe, give 110/120/12356, be honest that it can't call anyone. |
-| Your style rules | `style` memories | How you asked 小拜 to talk (「叫我瑞克」「别叫我宝宝」). They override the persona's defaults. |
+| Your style rules | `style` memories | How you asked 小拜 to talk (「叫我 Alex」「别叫我宝宝」). They override the persona's defaults. |
 | 最近说过的话 | last 3 replies | Phrases 小拜 just used, with "don't repeat these". |
 | 这一轮 | energy score, recent emojis | How many bubbles to send this turn (see section 2), and no emoji if one of the last two replies had one. This goes last, because instructions nearest the question are followed best. Left out in a crisis. |
 
@@ -144,9 +144,9 @@ The key safeguard: every fact must quote your own words as evidence, and the cod
 
 Facts have stable keys, so a change updates the old one (you moved, the exam moved). `/memory forget` leaves a tombstone, so older messages can't bring a fact back; only you saying it again can. Past events drop out of the prompt a week after their date. All facts go into the prompt, up to 100. Past that, search would be better, and that's on the plan.
 
-**Style rules: learning from your feedback.** When you tell 小拜 how to talk (「叫我瑞克」「别叫我宝宝，怪肉麻的」「别老带旺柴表情」), it's saved as a `style` fact. These aren't "mention when relevant" records. They go late in the prompt as standing rules that override the persona. Tested with the real model: after the chat history was cleared, 小拜 still called the user 瑞克 and dropped the emoji.
+**Style rules: learning from your feedback.** When you tell 小拜 how to talk (「叫我 Alex」「别叫我宝宝，怪肉麻的」「别老带旺柴表情」), it's saved as a `style` fact. These aren't "mention when relevant" records. They go late in the prompt as standing rules that override the persona. Tested with the real model: after the chat history was cleared, 小拜 still called the user Alex and dropped the emoji.
 
-**Rolling summary** (`src/memory/summary.ts`). The model sees the last 40 messages word for word. Once 10 more have scrolled out of that window, one call folds them into a running summary of up to 400 characters, which the prompt carries as 「更早聊过的」. So after days of chat, 小拜 still knows the thread: the hotpot photo, the love questions, the name 瑞克. Clearing history resets it. Forgetting a fact drops the summary text, since the summary is prose and might mention it, and the messages it hadn't reached yet are never folded in. A fold already in progress when you clear or forget is thrown away. Message ids are never reused, so the summary's position can't point at the wrong messages.
+**Rolling summary** (`src/memory/summary.ts`). The model sees the last 40 messages word for word. Once 10 more have scrolled out of that window, one call folds them into a running summary of up to 400 characters, which the prompt carries as 「更早聊过的」. So after days of chat, 小拜 still knows the thread: the hotpot photo, the love questions, the name Alex. Clearing history resets it. Forgetting a fact drops the summary text, since the summary is prose and might mention it, and the messages it hadn't reached yet are never folded in. A fold already in progress when you clear or forget is thrown away. Message ids are never reused, so the summary's position can't point at the wrong messages.
 
 **Retention.** Chat history older than 30 days is deleted (`COMPANION_HISTORY_DAYS`). With memory on, only messages already folded into the summary are deleted, so nothing is lost that the summary hasn't kept. Everything lives in `data/companion.sqlite` on the Mac. Nothing is uploaded anywhere except the model call itself.
 
@@ -212,7 +212,7 @@ Commands while running: `/pause`, `/resume`, `/proactive on|off`, `/memory`, `/m
 |---|---|
 | Looks like a real friend | Its own name and avatar, short bubbles, human pauses. Nothing on the phone gives it away. |
 | Sounds like a person | 0.2 AI tells per reply, 12 characters per bubble, 1–2 bubbles (bake-off). |
-| Memory you can trust | Every fact must quote your words. `/memory forget` really forgets. Style rules like 「叫我瑞克」 stick. |
+| Memory you can trust | Every fact must quote your words. `/memory forget` really forgets. Style rules like 「叫我 Alex」 stick. |
 | Writes first, with restraint | Good mornings, event luck, "thought of you". At most 2 a day, never a double text, backs off when asked. |
 | Safety that catches real crises | The model check caught 5 of 5 test crises that the keywords missed. |
 | Cheap | About $0.0005 per message; a month of daily chat costs well under $1. |
