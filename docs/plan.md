@@ -70,7 +70,7 @@ Record the results in `docs/design/wechat-transport.md`.
 - [x] **Learning from feedback** (2026-09-24): requests about how 小拜 talks become `style` memories, used as standing rules.
 - [ ] **Forgetting:** `/memory forget` should also remove the fact from recent history sent to the model, not only from the fact table.
 - [ ] **Memory claims:** 小拜 sometimes says 「我都记着」 when memory is off. Tighten the persona and add a bake-off case.
-- [ ] **Crisis detection:** add a cheap model-based check next to the keywords. Keep the keywords as a fallback.
+- [x] **Crisis detection** (2026-09-24): a model check runs alongside each reply and rewrites it in safety mode when it catches what the keywords miss. On 12 test phrases: model 12/12; keywords missed all 5 real crises (「活着好没意思」「我把药都攒起来了」…) and flagged 2 idioms. 「想死你了」 no longer trips the keywords.
 - [x] **History retention** (2026-09-24): `COMPANION_HISTORY_DAYS`, default 30; with memory on, only messages already in the summary are deleted. Disclosed in the README.
 
 ## Milestone 4: only if selling

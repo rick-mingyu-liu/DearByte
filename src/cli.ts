@@ -40,6 +40,7 @@ async function main() {
     parts: loadPromptParts(ROOT),
     timeZone: config.timeZone,
     historyMessages: config.historyMessages,
+    crisisCheck: !fake,
     onEvent: (e) => {
       const line = describeEvent(e);
       if (line) held ? held.push(line) : log(line);

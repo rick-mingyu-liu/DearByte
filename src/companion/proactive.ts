@@ -93,9 +93,10 @@ export function planProactive(ctx: PlanContext): ProactivePlan | null {
   const plan = pickPlan(ctx);
   if (!plan) return null;
   // After a crisis message, whatever the occasion, only a gentle check-in.
-  const gentle = ctx.history.some(
-    (m) => m.role === "user" && ctx.now.getTime() - Date.parse(m.createdAt) < GENTLE_MS && looksLikeCrisis(m.text),
-  );
+  const recent = (iso: string) => ctx.now.getTime() - Date.parse(iso) < GENTLE_MS;
+  const gentle =
+    (ctx.crisisAt != null && recent(ctx.crisisAt)) ||
+    ctx.history.some((m) => m.role === "user" && recent(m.createdAt) && looksLikeCrisis(m.text));
   return gentle ? { key: plan.key, note: GENTLE_NOTE } : plan;
 }
 
@@ -105,6 +106,8 @@ type PlanContext = {
   state: ProactiveState;
   history: StoredMessage[];
   facts: Fact[];
+  /** Last crisis turn (ISO), including ones only the model check caught. */
+  crisisAt?: string | null;
 };
 
 function pickPlan(ctx: PlanContext): ProactivePlan | null {

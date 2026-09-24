@@ -28,11 +28,13 @@ export function describeEvent(e: CompanionEvent): string | null {
       return `上下文 · ${e.historyMessages} 条历史 · 记忆${e.memoryEnabled ? ` ${e.facts} 条` : "关闭"}${e.image ? " · 含图片" : ""}${e.crisis ? " · 安全模式" : ""}`;
     case "model": {
       const cost = e.cost === null ? "" : ` · $${e.cost.toFixed(5)}`;
-      const label = { reply: "生成回复", repair: "修正格式", memory: "整理记忆" }[e.purpose];
+      const label = { reply: "生成回复", repair: "修正格式", memory: "整理记忆", safety: "安全检查" }[e.purpose];
       return `${label} · ${(e.ms / 1000).toFixed(1)}s · ${e.promptTokens} 入（${e.cacheHitTokens} 缓存）/ ${e.completionTokens} 出${cost}`;
     }
     case "reply_invalid":
       return `回复格式不合规（${e.problems.join("；")}）→ ${{ repair: "重试一次", salvage: "截断使用", fallback: "使用兜底回复" }[e.action]}`;
+    case "crisis_detected":
+      return "模型判断这条消息可能有安全风险（关键词没抓到）→ 用安全模式重写了回复";
     case "reply_trimmed":
       return `超过 2 条，删掉了：${e.dropped.join(" / ")}`;
     case "memory": {

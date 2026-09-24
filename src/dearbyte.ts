@@ -15,7 +15,7 @@ import { createInterface } from "node:readline/promises";
 import { DesktopChannel, type DesktopEvent } from "./channels/desktop/channel.ts";
 import { DesktopHelper, HelperError } from "./channels/desktop/helper.ts";
 import { PhotoFolder } from "./channels/desktop/photos.ts";
-import { Companion } from "./companion/companion.ts";
+import { Companion, CRISIS_AT_SETTING } from "./companion/companion.ts";
 import { dayState, planProactive, PROACTIVE_STATE_SETTING, readProactiveState, recordAttempt } from "./companion/proactive.ts";
 import { loadPromptParts } from "./companion/prompt.ts";
 import { localDate } from "./companion/time.ts";
@@ -158,6 +158,7 @@ async function main() {
     parts: loadPromptParts(ROOT),
     timeZone: config.timeZone,
     historyMessages: config.historyMessages,
+    crisisCheck: !fake,
     onEvent: (e) => {
       const line = film ? filmCompanionLine(e, names[0]) : describeEvent(e);
       if (line) film ? console.log(line) : log(line);
@@ -213,6 +214,7 @@ async function main() {
       state,
       history: store.recentMessages(config.historyMessages),
       facts: store.memoryEnabled() ? store.activeFacts() : [],
+      crisisAt: store.getSetting(CRISIS_AT_SETTING),
     });
     if (!plan) return;
     const result = await channel.initiate(plan.key, () => companion.initiate(plan.note));

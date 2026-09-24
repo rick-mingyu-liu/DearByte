@@ -5,17 +5,24 @@ import type { ChatModel, Completion } from "../model/provider.ts";
 import type { Store } from "../storage/store.ts";
 import { FALLBACK_REPLY, parseReply, type Reply } from "./output.ts";
 import { buildMessages, buildSystemPrompt, factsForPrompt, recentPhrases, type PromptParts } from "./prompt.ts";
+import { modelSeesCrisis } from "./crisis-check.ts";
 import { looksLikeCrisis } from "./safety.ts";
 import { localDate } from "./time.ts";
+
+/** When the last crisis turn was (ISO), by keywords or the model; proactive messages stay gentle after it. */
+export const CRISIS_AT_SETTING = "crisis_at";
+/** The crisis check gets this long in total; a slow check counts as no risk. */
+const CRISIS_CHECK_WAIT_MS = 8_000;
 
 /** Bubbles per reply outside a crisis. */
 export const CHAT_MAX_BUBBLES = 2;
 
 export type CompanionEvent =
   | { type: "context"; historyMessages: number; facts: number; memoryEnabled: boolean; crisis: boolean; image: boolean }
-  | { type: "model"; purpose: "reply" | "repair" | "memory"; ms: number; promptTokens: number; cacheHitTokens: number; completionTokens: number; cost: number | null }
+  | { type: "model"; purpose: "reply" | "repair" | "memory" | "safety"; ms: number; promptTokens: number; cacheHitTokens: number; completionTokens: number; cost: number | null }
   | { type: "reply_invalid"; problems: string[]; action: "repair" | "salvage" | "fallback" }
   | { type: "reply_trimmed"; dropped: string[] }
+  | { type: "crisis_detected"; by: "model" }
   | { type: "memory"; outcome: ExtractionOutcome }
   | { type: "memory_error"; message: string }
   | { type: "summary"; outcome: NonNullable<SummaryOutcome> };
@@ -39,6 +46,8 @@ export class Companion {
       parts: PromptParts;
       timeZone: string;
       historyMessages: number;
+      /** Also ask the model whether a message signals danger the keywords missed. */
+      crisisCheck?: boolean;
       now?: () => Date;
       onEvent?: (event: CompanionEvent) => void;
     },
@@ -65,13 +74,25 @@ export class Companion {
 
     const memoryEnabled = store.memoryEnabled();
     const facts = memoryEnabled ? factsForPrompt(store.activeFacts(), localDate(now, timeZone)) : [];
-    const crisis = looksLikeCrisis(input.text);
+    let crisis = looksLikeCrisis(input.text);
     this.emit({ type: "context", historyMessages: history.length, facts: facts.length, memoryEnabled, crisis, image: Boolean(input.image) });
 
+    // The model check runs alongside the reply; it only costs time when it fires.
+    const check =
+      !crisis && this.deps.crisisCheck && input.text.trim()
+        ? this.crisisCheck(input.text, [...history].reverse().find((m) => m.role === "user")?.text)
+        : null;
+
     const summary = memoryEnabled ? store.getSetting(SUMMARY_SETTING) : null;
-    const system = buildSystemPrompt(parts, { now, timeZone, memoryEnabled, facts, crisis, recent: recentPhrases(history), summary });
-    const messages = buildMessages(system, history, input);
-    let reply = await this.generate(messages);
+    const prompt = (crisis: boolean) =>
+      buildMessages(buildSystemPrompt(parts, { now, timeZone, memoryEnabled, facts, crisis, recent: recentPhrases(history), summary }), history, input);
+    let reply = await this.generate(prompt(crisis));
+    if (check && (await check)) {
+      crisis = true;
+      this.emit({ type: "crisis_detected", by: "model" });
+      reply = await this.generate(prompt(true));
+    }
+    if (crisis) store.setSetting(CRISIS_AT_SETTING, now.toISOString());
     // A third bubble reads as an AI over-explaining. Crisis replies keep all of
     // theirs: the safety prompt needs room for the hotline numbers.
     if (!crisis && reply.bubbles.length > CHAT_MAX_BUBBLES) {
@@ -144,6 +165,23 @@ export class Companion {
         store.addMessage("assistant", sent.join("\n"), { bubbles: sent, createdAt: (this.deps.now?.() ?? new Date()).toISOString() });
       },
     };
+  }
+
+  /** The model's view, given at most CRISIS_CHECK_WAIT_MS from the start of the turn; errors count as no. */
+  private crisisCheck(text: string, previous?: string): Promise<boolean> {
+    const { model } = this.deps;
+    const logged: ChatModel = {
+      name: model.name,
+      vision: model.vision,
+      cost: (usage) => model.cost(usage),
+      complete: async (msgs, opts) => {
+        const completion = await model.complete(msgs, opts);
+        this.emit({ type: "model", purpose: "safety", ms: completion.ms, ...completion.usage, cost: model.cost(completion.usage) });
+        return completion;
+      },
+    };
+    const timeout = new Promise<boolean>((resolve) => setTimeout(() => resolve(false), CRISIS_CHECK_WAIT_MS).unref());
+    return Promise.race([modelSeesCrisis(logged, text, previous).catch(() => false), timeout]);
   }
 
   /** One call, one repair attempt, then salvage or a fixed fallback. */

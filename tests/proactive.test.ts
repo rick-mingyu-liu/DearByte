@@ -206,3 +206,8 @@ test("after a message that looked like a crisis, whatever 小拜 starts is a gen
   // Three days later, back to normal.
   expect(plan(at("14:00", "2026-09-25"), { history: hard })?.note).toContain("在忙啥");
 });
+
+test("a crisis only the model caught also makes proactive messages gentle", () => {
+  const p = plan(at("14:00"), { history: [msg("user", at("10:00", "2026-09-22"), "活着好没意思")], crisisAt: at("10:00", "2026-09-22").toISOString() });
+  expect(p?.note).toContain("轻轻问一句");
+});
