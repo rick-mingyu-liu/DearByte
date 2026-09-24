@@ -196,3 +196,13 @@ test("after the user asks for space, 小拜 doesn't write first for three days",
   }
   expect(plan(at("14:00"), { history: [msg("user", at("10:00", "2026-09-22"), "别忘了明天考试")] })?.key).toBe("checkin");
 });
+
+test("after a message that looked like a crisis, whatever 小拜 starts is a gentle check-in", () => {
+  const hard = [msg("user", at("10:00", "2026-09-22"), "最近真的撑不下去了"), msg("assistant", at("10:00", "2026-09-22"))];
+  const p = plan(at("14:00"), { history: hard });
+  expect(p?.key).toBe("checkin");
+  expect(p?.note).toContain("轻轻问一句");
+  expect(p?.note).not.toContain("在忙啥");
+  // Three days later, back to normal.
+  expect(plan(at("14:00", "2026-09-25"), { history: hard })?.note).toContain("在忙啥");
+});

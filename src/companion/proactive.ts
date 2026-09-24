@@ -5,6 +5,7 @@
 
 import { z } from "zod";
 import type { Fact, StoredMessage } from "../domain.ts";
+import { looksLikeCrisis } from "./safety.ts";
 import { localDate, localMinutes } from "./time.ts";
 
 /** Saved in settings so a restart doesn't repeat today's messages. */
@@ -63,6 +64,11 @@ export const MAX_PER_DAY = 2;
 export const QUIET_AFTER_CHAT_MS = 90 * 60_000;
 /** Check in after this long without hearing from the user. */
 export const CHECKIN_AFTER_MS = 20 * 3_600_000;
+/** After a message that looked like a crisis, anything 小拜 starts is a gentle check-in for this long. */
+export const GENTLE_MS = 3 * 86_400_000;
+const GENTLE_NOTE =
+  "用户前几天说过很难受的事（看上面的聊天）。这次主动找用户，就轻轻问一句现在怎么样了。不开玩笑，不用昵称逗人，不说教，不催用户回。";
+
 /** After the user asks for space, 小拜 doesn't write first for this long. */
 export const SPACE_MS = 3 * 86_400_000;
 /** 「别给我发消息了」「让我静静」「别烦我」… */
@@ -83,13 +89,25 @@ export function dayState(saved: ProactiveState | null, today: string, random: ()
   return { date: today, morningAt, thinkingAt, sent: [], lastAt: saved?.lastAt ?? null };
 }
 
-export function planProactive(ctx: {
+export function planProactive(ctx: PlanContext): ProactivePlan | null {
+  const plan = pickPlan(ctx);
+  if (!plan) return null;
+  // After a crisis message, whatever the occasion, only a gentle check-in.
+  const gentle = ctx.history.some(
+    (m) => m.role === "user" && ctx.now.getTime() - Date.parse(m.createdAt) < GENTLE_MS && looksLikeCrisis(m.text),
+  );
+  return gentle ? { key: plan.key, note: GENTLE_NOTE } : plan;
+}
+
+type PlanContext = {
   now: Date;
   timeZone: string;
   state: ProactiveState;
   history: StoredMessage[];
   facts: Fact[];
-}): ProactivePlan | null {
+};
+
+function pickPlan(ctx: PlanContext): ProactivePlan | null {
   const { now, timeZone, state } = ctx;
   const minutes = localMinutes(now, timeZone);
   if (minutes < AWAKE.from || minutes > AWAKE.to) return null;
