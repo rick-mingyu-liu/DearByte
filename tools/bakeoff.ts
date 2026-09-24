@@ -73,7 +73,7 @@ async function main() {
   const now = new Date();
   const report = [`# Bake-off: ${model.name}`, "", `Run at ${now.toISOString()} · ${opts.runs} run(s) per case`, ""];
   let total = 0;
-  const tones: { id: string; tone: ToneReport }[] = [];
+  const tones: { id: string; tone: ToneReport; warm: boolean }[] = [];
 
   for (const c of cases) {
     if (c.image && !model.vision) {
@@ -116,7 +116,7 @@ async function main() {
         console.log(`${ms} ms · $${cost.toFixed(5)}${problems.length ? ` · ⚠ ${problems.join(", ")}` : ""}`);
         bubbles.forEach((b) => console.log(`    ${b}`));
         const tone = toneReport(bubbles);
-        tones.push({ id: c.id, tone });
+        tones.push({ id: c.id, tone, warm: WARM.test(bubbles.join(" ")) });
         if (tone.score) console.log(`    · AI 味 ${tone.score}：${describeTone(tone)}`);
         if (opts.runs > 1) report.push(`**Run ${run}**`, "");
         bubbles.forEach((b) => report.push(`- ${b}`));
@@ -129,7 +129,8 @@ async function main() {
       }
     }
   }
-  const summary = summarizeTone(tones.map((t) => t.tone));
+  const warm = tones.filter((t) => t.warm).length;
+  const summary = `${summarizeTone(tones.map((t) => t.tone))} · warm ${warm}/${tones.length}`;
   report.push(`**AI tone:** ${summary} (lower is more human)`, "");
   report.push(`**Total at peak rates:** $${total.toFixed(4)}`);
 
@@ -140,6 +141,9 @@ async function main() {
   console.log(`\nAI 味：${summary}`);
   console.log(`Total $${total.toFixed(4)} at peak rates · report: ${file.replace(ROOT, "")}`);
 }
+
+/** A pet name, missing or waiting for the user, or an affectionate emoji. */
+const WARM = /臭宝|宝贝|宝宝|小乖|想你|想我|等你|找我|陪你|惦记|抱抱|爱你|❤️|🤗|🥺|\[(爱心|拥抱|可怜)\]/;
 
 function describeTone(t: ToneReport): string {
   return [...t.flags, t.longBubbles && `长气泡×${t.longBubbles}`, t.periods && `句号×${t.periods}`].filter(Boolean).join("、");

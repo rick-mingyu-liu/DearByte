@@ -19,9 +19,9 @@ export function userEnergy(input: { text: string; image?: boolean }): Energy {
 export function bubbleHint(energy: Energy): string | null {
   switch (energy) {
     case "low":
-      return "对方这条很短、很随意。这一轮只回 1 条，也短一点。";
+      return "对方这条很短、很随意。这一轮只回 1 条，短一点，但要带点温度（在乎、亲昵、撒个娇都行），别只做冷静的点评。";
     case "mid":
-      return "这一轮回 1 条。只有真有两件不同的事要说（比如一个反应加一个问题），才用 2 条。";
+      return "这一轮回 1 条，要带点温度。只有真有两件不同的事要说（比如一个反应加一句贴心的话），才用 2 条。";
     case "high":
       return null;
   }
