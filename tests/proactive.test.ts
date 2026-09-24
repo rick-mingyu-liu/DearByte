@@ -31,6 +31,8 @@ test("good morning at today's random time, only if not talked yet today", () => 
   expect(plan(at("08:25"), { state: state({ morningAt: 500, sent: ["morning"] }) })).toBeNull();
   const talked = [msg("user", at("06:00")), msg("assistant", at("06:00"))];
   expect(plan(at("08:25"), { state: s, history: talked })).toBeNull();
+  const lateNight = [msg("user", at("03:00")), msg("assistant", at("03:00"))];
+  expect(plan(at("08:25"), { state: s, history: lateNight })?.key).toBe("morning");
 });
 
 test("an event today gets luck in the morning and a follow-up in the evening", () => {

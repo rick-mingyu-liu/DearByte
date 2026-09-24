@@ -166,7 +166,9 @@ function pickPlan(ctx: PlanContext): ProactivePlan | null {
     };
   }
 
-  const talkedToday = localDate(new Date(lastUser.createdAt), timeZone) === today;
+  // A chat at 2 a.m. belongs to the night before; it shouldn't cancel the good morning.
+  const lastUserAt = new Date(lastUser.createdAt);
+  const talkedToday = localDate(lastUserAt, timeZone) === today && localMinutes(lastUserAt, timeZone) >= hm(5);
   if (
     state.morningAt !== null &&
     minutes >= state.morningAt &&
