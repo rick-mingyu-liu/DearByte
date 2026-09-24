@@ -60,6 +60,20 @@ Row titles:
 - **Pasting into the composer:** pasting an image (as a file link or as PNG data) with ⌘V sent through `postToPid` does nothing. WeChat's Edit → Paste menu item is disabled while WeChat isn't the active app.
 - **The Stickers button:** it exists in the chat toolbar (`AXButton` titled "Stickers"), but the panel it opens isn't exposed through Accessibility while WeChat is on another Space.
 
-So sending stickers means bringing WeChat to the front for a moment: activate it, paste, press Return, then switch back. That takes focus from whoever is using the Mac, and switches Spaces if WeChat is on another one. Not built yet.
+**WeChat's own sticker packs** (downloaded from the sticker store) are the stickers we want. They are encrypted on disk (`Stickers/Persistence`, and `stickers.db` is not plain SQLite), and we won't try to decrypt them. The panel does open on a real click with WeChat in front, but its contents aren't exposed to Accessibility. A screenshot from the operator shows what's in it:
+
+- **Layout:** a grid of 5 per row, each sticker with a text label, plus tabs along the bottom: search, emoji, favourites, then one tab per downloaded pack.
+- **Labels in the first pack:** 早安, 早早, 得意, 超得意, 送你fafa, 想宝宝, 收到, ok, 摸摸头, 可怜巴巴.
+
+**Plan for later (dedicated Mac only, behind a `--stickers` flag):**
+1. List the pack labels in a config file, by tab and grid position.
+2. 小拜 picks a label, the same way it picks emojis.
+3. The helper brings WeChat to the front and clicks the Stickers button.
+4. It finds the panel's frame with `CGWindowListCopyWindowInfo`; bounds need no Screen Recording permission.
+5. It clicks the pack tab and the cell, confirms a new "Me" row, and switches back.
+
+It breaks if the pack order or panel layout changes.
+
+In general, sending stickers means bringing WeChat to the front for a moment: activate it, paste, press Return, then switch back. That takes focus from whoever is using the Mac, and switches Spaces if WeChat is on another one. Not built yet.
 
 **Emojis:** Unicode emojis are plain text and work. WeChat's own codes such as `[捂脸]` were sent in a test from the English UI; whether they render on the phone is still to be confirmed.
