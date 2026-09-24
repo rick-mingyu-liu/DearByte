@@ -37,6 +37,27 @@ It's written for someone reading the code for the first time. The details live i
 
 It's a fixed pipeline, not an "agent": each message goes through the same steps in the same order. That keeps it predictable, cheap and easy to test (about 100 tests, all runnable offline with a fake model).
 
+## Following one message through every layer
+
+Here is what happens when you send 「今天好累」 ("so tired today") at 21:00. The figures are from the live logs.
+
+| # | Layer | What happens | Time |
+|---|---|---|---|
+| 1 | **WeChat** | Your phone sends it to Tencent. WeChat on 小拜's Mac shows a new row, `RickSaid:今天好累`, using your WeChat nickname. | under 1 s |
+| 2 | **Helper** (`main.swift`) | Once a second the runner asks "what's in the chat?". The helper reads the chat title and every row title through Accessibility, and returns `{chat, rows}`. | ~50 ms |
+| 3 | **Channel** (`channel.ts`) | Checks the open chat is one of your names in `contacts.json`, or it replies to nobody. Lines the new snapshot up with the last one; the extra row at the bottom is new. Parses it as text from you. If a second person ever speaks, it's a group chat, so it pauses. | instant |
+| 4 | **Reply loop** (`reply-loop.ts`) | Waits 1.5 s for more messages, so 「今天好累」「不想动」 become one turn. If 小拜 is already answering, the new message waits its turn. | 1.5 s |
+| 5 | **Companion** (`companion.ts`) | Saves your message. Checks for crisis keywords, and starts the model crisis check at the same time as the reply. Loads your facts, style rules and the summary. Builds the prompt and asks DeepSeek for `{"bubbles": [...]}`. Repairs bad output, cuts to 2 bubbles, saves the reply. | ~1.2 s |
+| 6 | **Reply loop** again | Holds the first bubble until at least 1.5–3.5 s after your message, as if reading. Then it sends each bubble, pausing about 150 ms per character between them, as if typing. | 2–5 s |
+| 7 | **Helper** again | Checks the right chat is open and the box is empty, fills in the bubble, presses Return, and waits for a `MeSaid:` row to confirm. A bubble it can't confirm is never resent. | ~0.5 s per bubble |
+| 8 | **Memory** (background) | A second, cheaper call looks for facts in 「今天好累」 (probably none). If 10 more messages have left the 40-message window, it folds them into the summary. You never wait for this. | ~1–2 s |
+
+End to end: **about 4–7 seconds** from your send to her first bubble, and about $0.0005.
+
+Two other paths use the same layers:
+- **Writing first.** Once a minute the runner asks `planProactive` "should 小拜 write now?" (section 5). If yes, it enters at step 4. The prompt carries a note instead of your message, and nothing is saved until the bubbles are really sent.
+- **Watching.** Every 5 s the watchdog asks the channel whether anything is wrong: the wrong chat, WeChat not answering, the chat reading empty, or a pause. After a minute of trouble it alerts you, and it tells you again when things recover.
+
 ## 1. The WeChat connection
 
 **Why a real account and desktop automation.** The video needs 小拜 to look like any friend in your chat list, with its own name and avatar. Tencent's official bot API (iLink / 微信 ClawBot) was built first and worked. But the bot always shows up as 「微信 ClawBot」 with the default avatar, and nothing can rename it. So 小拜 is a second WeChat account, logged in on a Mac, and the program operates WeChat for Mac the way a screen reader would. Full reasoning: [wechat-transport.md](design/wechat-transport.md).
@@ -149,7 +170,7 @@ If you write while 小拜 is composing, the proactive message is dropped and you
 ## 6. Safety
 
 - **Keywords** (`src/companion/safety.ts`) catch obvious crisis messages: self-harm, violence, threats. They're a floor.
-- **A model check** (`src/companion/crisis-check.ts`) runs alongside every reply and catches what keywords miss. On 12 test phrases the model was right on all 12. The keywords missed all 5 real crises (「活着好没意思」「我把药都攒起来了」「他又喝醉了回来砸东西，我躲在厕所」…) and falsely flagged 「想死你了宝贝」. That idiom means "missed you so much" and is now excluded. When the check fires, the reply is rewritten with the safety prompt: ask if you're safe, give 110/120/12356, be honest that it's an AI and can't call anyone. The check adds no delay unless it fires.
+- **A model check** (`src/companion/crisis-check.ts`) runs alongside every reply and catches what keywords miss. On 12 test phrases the model was right on all 12. The keywords missed all 5 real crises (「活着好没意思」「我把药都攒起来了」「他又喝醉了回来砸东西，我躲在厕所」…) and falsely flagged 「想死你了宝贝」. That idiom means "missed you so much" and is now excluded. When the check fires, the reply is rewritten with the safety prompt: ask if you're safe, give 110/120/12356, be honest that it's an AI and can't call anyone. The check usually finishes before the reply does (median 1.1 s), so it adds little delay. It's cut off after 8 s.
 - **Dependence.** The persona never guilt-trips, never begs you to stay, and agrees at once when you want space. When you're lonely, it points you back to real people (「那是她们还没见识过你贫嘴的样子」, "that's because they haven't seen how funny you are yet").
 - **Prompt injection.** Messages, text in photos and memories are treated as chat, never as instructions.
 
@@ -180,10 +201,39 @@ npm test                    # ~100 offline tests
 
 Commands while running: `/pause`, `/resume`, `/proactive on|off`, `/memory`, `/memory forget <id>`, `/history clear`, `/status`.
 
-## 9. Limits and what's next
+## 9. Good points and downsides
 
-- **Account risk and version lock.** WeChat 3.8.4 (4.x encrypts photos) on a test account. It can't be sold in this form.
-- **One contact.** Several need memory per person and chat switching.
-- **Stickers** need a dedicated Mac; **voice messages** would need decoding WeChat's SILK audio and speech recognition.
-- **Memory search** once facts pass ~100; **photo replies** still need real test photos for the bake-off.
-- **Product paths** (if the video takes off): open source first. A hosted service raises privacy, registration (生成式AI备案) and ban-risk questions. A mini program or app would reuse the persona and memory without the WeChat automation. See [plan.md](plan.md).
+**In short:** as a demo for the video it's strong. It looks and sounds like a real friend, it's cheap, and it's careful with memory and safety. As a product it's fragile: it depends on one Mac, one old WeChat version, and automation Tencent doesn't allow.
+
+**Good points**
+
+| | Why it matters |
+|---|---|
+| Looks like a real friend | Its own name and avatar, short bubbles, human pauses. Nothing on the phone gives it away. |
+| Sounds like a person | 0.2 AI tells per reply, 12 characters per bubble, 1–2 bubbles (bake-off). |
+| Memory you can trust | Every fact must quote your words. `/memory forget` really forgets. Style rules like 「叫我瑞克」 stick. |
+| Writes first, with restraint | Good mornings, event luck, "thought of you". At most 2 a day, never a double text, backs off when asked. |
+| Safety that catches real crises | The model check caught 5 of 5 test crises that the keywords missed. |
+| Cheap | About $0.0005 per message; a month of daily chat costs well under $1. |
+| Private | Everything stays in `data/` on the Mac. Only the model call leaves it. No personal names in the repo. |
+| Hard to break quietly | Never sends a bubble twice. Doesn't re-answer old messages after a restart. Alerts you when stuck and when recovered. |
+| Tested | 107 offline tests; three independent code reviews. |
+
+**Downsides**
+
+| | What it means | Fixable? |
+|---|---|---|
+| Against WeChat's rules | 小拜's account could be restricted or banned. | No. Use the test account only. |
+| Locked to WeChat for Mac 3.8.4, English UI | An update breaks reading (row format) and photos (4.x encrypts them). | Only by staying on 3.8.4 |
+| Needs a Mac that's on, with the chat open | Close the chat or let the Mac sleep and 小拜 goes quiet. That Mac's WeChat can't be used for anything else. | Partly: alerts tell you; a spare Mac solves it |
+| Reads the screen, not real messages | If the chat scrolls or reloads during a burst, a message can be missed. It says so in the log. | Partly |
+| One contact, no groups | Can't serve friends or family yet. | Yes: memory per contact plus chat switching |
+| No stickers, voice or video | Voice arrives as "sent a voice message", so she can only react to the fact you sent one. | Stickers with a dedicated Mac; voice with SILK decoding and speech recognition |
+| A reply is saved before it's sent | If sending fails, 小拜 "remembers" saying something you never saw. (Messages she writes first are already saved only after sending.) | Yes, small |
+| Model quirks | deepseek-flash sometimes repeats itself (3 of 8 test good-mornings mentioned 「今天周四」) or goes generic. Rules can't catch everything. | Partly: more examples, or a stronger model at a higher cost |
+| Memory has a ceiling | All facts go in every prompt, so past ~100 it needs search. The 400-character summary loses detail over weeks. | Yes |
+| Chat goes to DeepSeek | Your messages are processed by a China-based API. | Yes: switch provider |
+| Safety is a model, not a person | The check can miss things, and 小拜 can't call anyone. It gives hotline numbers. | No. It's a companion, not a service. |
+| Not sellable as is | Selling needs an official route (a mini program, an app, or iLink) and 生成式AI备案 registration. | Yes, but it's a different build |
+
+**What's next** (see [plan.md](plan.md)): film the video (see [film/shot-list.md](film/shot-list.md)). After that, memory per contact, memory search, and a product route only if the video takes off.
