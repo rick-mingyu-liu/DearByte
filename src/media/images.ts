@@ -1,7 +1,14 @@
-import { readFileSync, statSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { ImageInput } from "../domain.ts";
 
+/** Largest image sent to the model. */
 export const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+/** Largest file read at all; HEIC sources are converted and resized first. */
+const MAX_SOURCE_BYTES = 50 * 1024 * 1024;
+const tooBig = (size: number) => new ImageError(`图片太大（${(size / 1024 / 1024).toFixed(1)} MB），上限 10 MB`);
 
 /** Detects JPEG, PNG or WebP from the file's bytes, not its name. */
 export function sniffImageType(bytes: Uint8Array): string | null {
@@ -20,6 +27,25 @@ export function sniffImageType(bytes: Uint8Array): string | null {
 
 export class ImageError extends Error {}
 
+const isHeic = (bytes: Uint8Array) => {
+  const brand = String.fromCharCode(...bytes.subarray(4, 12));
+  return brand.startsWith("ftyp") && /heic|heix|mif1|msf1/.test(brand.slice(4));
+};
+
+/** HEIC (iPhone photos) → JPEG via macOS's built-in sips. Temp file is removed. */
+function convertHeic(path: string): ImageInput {
+  const dir = mkdtempSync(join(tmpdir(), "dearbyte-heic-"));
+  const out = join(dir, "photo.jpg");
+  try {
+    execFileSync("sips", ["-s", "format", "jpeg", "-Z", "2048", path, "--out", out], { stdio: "ignore" });
+    return { mimeType: "image/jpeg", bytes: new Uint8Array(readFileSync(out)) };
+  } catch {
+    throw new ImageError("HEIC 转换失败（需要 macOS 自带的 sips），请先手动转成 JPEG");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 export function loadImage(path: string): ImageInput {
   let size: number;
   try {
@@ -27,9 +53,37 @@ export function loadImage(path: string): ImageInput {
   } catch {
     throw new ImageError(`找不到图片：${path}`);
   }
-  if (size > MAX_IMAGE_BYTES) throw new ImageError(`图片太大（${(size / 1024 / 1024).toFixed(1)} MB），上限 10 MB`);
+  if (size > MAX_SOURCE_BYTES) throw tooBig(size);
   const bytes = new Uint8Array(readFileSync(path));
   const mimeType = sniffImageType(bytes);
-  if (!mimeType) throw new ImageError("只支持 JPEG、PNG、WebP（iPhone 的 HEIC 需要先转成 JPEG）");
-  return { mimeType, bytes };
+  if (mimeType) {
+    if (size > MAX_IMAGE_BYTES) throw tooBig(size);
+    return { mimeType, bytes };
+  }
+  if (isHeic(bytes)) {
+    const converted = convertHeic(path);
+    if (converted.bytes.length > MAX_IMAGE_BYTES) throw tooBig(converted.bytes.length);
+    return converted;
+  }
+  throw new ImageError("只支持 JPEG、PNG、WebP、HEIC");
+}
+
+/**
+ * Splits "/img" arguments into a path and caption. Accepts quoted paths and
+ * backslash-escaped spaces, as produced by dragging a file into the terminal.
+ */
+export function parseImageArgs(input: string): { path: string; caption: string } {
+  const s = input.trim();
+  const quote = s[0];
+  if (quote === '"' || quote === "'") {
+    const end = s.indexOf(quote, 1);
+    if (end > 0) return { path: s.slice(1, end), caption: s.slice(end + 1).trim() };
+  }
+  let path = "";
+  let i = 0;
+  for (; i < s.length && !/\s/.test(s[i]); i++) {
+    if (s[i] === "\\" && i + 1 < s.length) i++;
+    path += s[i];
+  }
+  return { path, caption: s.slice(i).trim() };
 }

@@ -11,7 +11,7 @@ import { Companion, type CompanionEvent } from "./companion/companion.ts";
 import { loadPromptParts } from "./companion/prompt.ts";
 import { localDate } from "./companion/time.ts";
 import { loadConfig, ROOT } from "./config.ts";
-import { ImageError, loadImage } from "./media/images.ts";
+import { ImageError, loadImage, parseImageArgs } from "./media/images.ts";
 import { DeepSeekModel } from "./model/deepseek.ts";
 import { FakeModel } from "./model/fake.ts";
 import type { ChatModel } from "./model/provider.ts";
@@ -19,7 +19,7 @@ import { Store } from "./storage/store.ts";
 
 const HELP = `命令：
   直接输入文字          以用户身份发消息
-  /img <路径> [配文]    发一张图片（JPEG / PNG / WebP）
+  /img <路径> [配文]    发一张图片（JPEG / PNG / WebP / HEIC，可直接拖进终端）
   /memory               列出记得的事
   /memory on | off      开启 / 关闭长期记忆
   /memory forget <id>   删除一条记忆
@@ -159,8 +159,9 @@ async function main() {
     else if (command === "/help") console.log(HELP);
     else if (command === "/status") status();
     else if (command === "/img") {
-      if (!args[0]) log("用法：/img <路径> [配文]");
-      else await send(args.slice(1).join(" "), args[0]);
+      const { path, caption } = parseImageArgs(line.slice("/img".length));
+      if (!path) log("用法：/img <路径> [配文]（可以直接把图片拖进终端）");
+      else await send(caption, path);
     } else if (command === "/memory") {
       await Promise.allSettled(pending); // show facts from the latest turn too
       const [sub, arg] = args;
