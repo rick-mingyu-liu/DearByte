@@ -80,8 +80,8 @@ If Xiaobai keeps waiting, check that the current chat title exactly matches an e
 How it behaves:
 - **Who gets replies:** only the one-to-one chat listed in `data/contacts.json`. The file is gitignored because it holds real names; `contacts.example.json` shows the format. List every name WeChat may show at the top of that chat (the remark, the nickname, old names), so renaming the chat doesn't stop replies. Edit the file and restart to change it. Only one contact is supported for now: several would need separate history and memory per person, and a way to switch chats.
 - **Other chats:** if you open another chat on the Mac, 小拜 waits until it's back. Messages already in the chat when it starts are never answered. If a second person speaks in the chat (a group), it pauses.
-- **Bursts:** several quick messages (within about 1.5 s) become one turn.
-- **Timing:** the first bubble comes 1.5–3.5 s after the message at the earliest, as if reading it; later bubbles take about as long as typing them, with some jitter.
+- **Bursts:** several quick messages (within about 1 s) become one turn.
+- **Timing:** the first bubble waits a moment as if reading it: about 0.6 s for 「在吗」, longer for a long message or a photo, at most 3 s (±25%), counting model time; later bubbles take about as long as typing them, with some jitter.
 - **Photos:** read from WeChat's local image folder for that chat (`COMPANION_WECHAT_MEDIA_DIR`). Without it, 小拜 is told it can't see the picture. Stickers, voice, video and files are described to 小拜 as things it can't open.
 - **Writing first:** 小拜 sometimes messages you unprompted, like a friend would:
   - a good morning on some days (about 6 in 10), at a random time between 8:00 and 9:30, if you haven't talked yet that day;

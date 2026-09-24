@@ -406,8 +406,8 @@ test("health reports a pause and a chat that keeps reading empty, for alerts", (
   channel.paused = true;
   expect(channel.health).toContain("暂停");
   channel.resume();
-  for (let i = 0; i < 29; i++) channel.poll({ chat: CHAT, rows: [] });
-  expect(channel.health).toBeNull(); // a blip
+  for (let i = 0; i < 59; i++) channel.poll({ chat: CHAT, rows: [] });
+  expect(channel.health).toBeNull(); // a blip (under 30 s at two reads a second)
   channel.poll({ chat: CHAT, rows: [] });
   expect(channel.health).toContain("读成空的");
   channel.poll({ chat: CHAT, rows: [said("早")] });

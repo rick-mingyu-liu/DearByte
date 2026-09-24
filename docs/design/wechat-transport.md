@@ -17,7 +17,7 @@ iLink is Tencent's official personal-account bot API, and technically the better
 
 ## How it works
 
-`native/wechat-desktop/main.swift` is a small helper that talks JSON lines over stdin/stdout. `src/channels/desktop/` polls it every second.
+`native/wechat-desktop/main.swift` is a small helper that talks JSON lines over stdin/stdout. `src/channels/desktop/` polls it twice a second.
 
 - **Finding the window:** `kAXMainWindowAttribute` of `com.tencent.xinWeChat`. This works while WeChat is on another Space, where `AXWindows` is empty.
 - **Reading:** the messages are an `AXTable` described as "Messages"; each row's cell children carry an `AXTitle`.
