@@ -132,6 +132,7 @@ npm run typecheck
 | [工作原理（英文）](docs/how-it-works.md) | 回复生成、记忆和存储 |
 | [项目计划（英文）](docs/plan.md) | 决策、进展和里程碑 |
 | [改进方向（英文）](docs/improvements.md) | 后续可以改进的地方 |
+| [参与贡献（英文）](CONTRIBUTING.md) | 提 PR 前请先看；安全问题见 [SECURITY.md](SECURITY.md) |
 
 ## 致谢
 

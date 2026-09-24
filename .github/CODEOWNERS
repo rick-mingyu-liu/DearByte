@@ -1,0 +1,13 @@
+# Every change needs a review from the maintainer. The paths below are listed
+# separately because they matter most: they drive WeChat on a real Mac, run
+# code at install or in CI, or keep people safe.
+*                           @rick-mingyu-liu
+
+/native/                    @rick-mingyu-liu
+/src/channels/              @rick-mingyu-liu
+/src/model/                 @rick-mingyu-liu
+/prompts/safety.zh-CN.md    @rick-mingyu-liu
+/src/companion/crisis*      @rick-mingyu-liu
+/package.json               @rick-mingyu-liu
+/package-lock.json          @rick-mingyu-liu
+/.github/                   @rick-mingyu-liu
