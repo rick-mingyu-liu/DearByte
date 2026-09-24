@@ -24,15 +24,17 @@ const said = (t: string) => `${SENDER}Said:${t}`;
 // --- Rows ------------------------------------------------------------------
 
 test("parses the row formats WeChat for Mac exposes", () => {
-  expect(parseRow(said("看看这张照片"))).toEqual({ kind: "text", text: "看看这张照片" });
-  expect(parseRow(said("a:b"))).toEqual({ kind: "text", text: "a:b" });
-  expect(parseRow("张三Said:hi")).toEqual({ kind: "text", text: "hi" });
-  expect(parseRow(`${SENDER}:Sent aPhoto`)).toEqual({ kind: "photo" });
-  expect(parseRow(`${SENDER}:Sent a Sticker`)).toEqual({ kind: "other", label: "Sent a Sticker" });
+  expect(parseRow(said("看看这张照片"))).toEqual({ kind: "text", sender: SENDER, text: "看看这张照片" });
+  expect(parseRow(said("a:b"))).toEqual({ kind: "text", sender: SENDER, text: "a:b" });
+  expect(parseRow("张三Said:hi")).toEqual({ kind: "text", sender: "张三", text: "hi" });
+  expect(parseRow(`${SENDER}:Sent aPhoto`)).toEqual({ kind: "photo", sender: SENDER });
+  expect(parseRow(`${SENDER}:Sent a Sticker`)).toEqual({ kind: "other", sender: SENDER, label: "Sent a Sticker" });
   expect(parseRow("MeSaid:hi")).toEqual({ kind: "mine" });
   expect(parseRow("MeSaid:AlexSaid:x")).toEqual({ kind: "mine" });
   expect(parseRow("Yesterday 23:51")).toEqual({ kind: "meta" });
   expect(parseRow("01:34")).toEqual({ kind: "meta" });
+  expect(parseRow("")).toEqual({ kind: "meta" });
+  expect(parseRow("张三说：你好")).toEqual({ kind: "unknown" }); // e.g. the Chinese UI
   expect(describeOther("Sent a Sticker")).toContain("表情包");
 });
 
@@ -42,6 +44,11 @@ test("finds new rows, keeping repeated identical messages", () => {
   expect(newRows(["x", "a", "b"], ["a", "b", "c"])).toEqual(["c"]); // old row dropped from the top
   expect(newRows(["a", "b"], ["c", "d"])).toBeNull();
   expect(newRows([], ["a"])).toEqual(["a"]);
+  // An empty read, or a full chat appearing after one, is not a list of new messages.
+  expect(newRows(["a", "b"], [])).toBeNull();
+  expect(newRows([], ["a", "b", "c", "d"])).toBeNull();
+  // A row that changed in place counts only if its old value was a placeholder.
+  expect(newRows(["a", "b"], ["a", "B"], (old) => old === "")).toEqual([]);
   // A row that changes while loading is reported once, alongside rows appended after it.
   expect(newRows(["a", "b", "loading"], ["a", "b", "photo", "c"])).toEqual(["photo", "c"]);
 });
@@ -56,6 +63,20 @@ test("merges a burst: texts in order, latest photo, note for the rest", () => {
 });
 
 // --- Photos ----------------------------------------------------------------
+
+test("a burst of photos claims all of them and returns the newest", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "dearbyte-photos-"));
+  const folder = new PhotoFolder(dir, { sleep: async () => {} });
+  const t = Date.now() / 1000;
+  writeFileSync(join(dir, "1_.pic.jpg"), "first");
+  utimesSync(join(dir, "1_.pic.jpg"), t - 2, t - 2);
+  writeFileSync(join(dir, "2_.pic.jpg"), JPEG);
+  expect(await folder.claim(Date.now(), 2)).toEqual(JPEG);
+  let now = Date.now();
+  const later = new PhotoFolder(dir, { sleep: async () => void (now += 20_000), now: () => now });
+  later.markExistingSeen();
+  await expect(later.claim(Date.now())).rejects.toThrow();
+});
 
 test("claims each new full-size photo once and ignores thumbnails and old files", async () => {
   const dir = mkdtempSync(join(tmpdir(), "dearbyte-photos-"));
@@ -166,6 +187,52 @@ test("without the photo folder, 小拜 is told it can't see the picture", async 
   await channel.settle();
   expect(model.calls[0].messages.at(-1)?.content).toBe("（用户发了一张图，但图片没加载出来，你看不到）");
   expect(events.some((e) => e.type === "error")).toBe(true);
+});
+
+test("an empty read never makes it re-answer the chat", async () => {
+  const { channel, model } = setup({ responses: [reply("好")] });
+  const history = [said("旧的一"), "MeSaid:旧回复", said("旧的二"), said("旧的三")];
+  channel.poll({ chat: CHAT, rows: history });
+  channel.poll({ chat: CHAT, rows: [] });
+  channel.poll({ chat: CHAT, rows: history });
+  channel.poll({ chat: CHAT, rows: [...history, said("新的")] });
+  await channel.settle();
+  expect(model.calls).toHaveLength(1);
+  expect(model.calls[0].messages.at(-1)?.content).toBe("新的");
+});
+
+test("a message that changes in place is not answered twice", async () => {
+  const { channel, model } = setup({ responses: [reply("好")] });
+  channel.poll({ chat: CHAT, rows: ["01:00", said("在吗")] });
+  channel.poll({ chat: CHAT, rows: ["01:00", said("在吗？")] });
+  await channel.settle();
+  expect(model.calls).toHaveLength(0);
+});
+
+test("a second sender means a group chat: it pauses instead of answering", async () => {
+  const { channel, model, events } = setup();
+  channel.poll({ chat: CHAT, rows: [] });
+  channel.poll({ chat: CHAT, rows: [said("hi"), "BobSaid:hello"] });
+  await channel.settle();
+  expect(model.calls).toHaveLength(0);
+  expect(channel.paused).toBe(true);
+  expect(events).toContainEqual({ type: "status", message: expect.stringContaining("群聊") });
+});
+
+test("reports a row it can't read instead of dropping it silently", () => {
+  const { channel, events } = setup();
+  channel.poll({ chat: CHAT, rows: [] });
+  channel.poll({ chat: CHAT, rows: ["张三说：你好"] });
+  expect(events).toContainEqual({ type: "status", message: expect.stringContaining("看不懂") });
+});
+
+test("after shutdown starts, nothing more is typed into WeChat", async () => {
+  const { channel, sent } = setup({ responses: [reply("一", "二")] });
+  channel.poll({ chat: CHAT, rows: [] });
+  channel.poll({ chat: CHAT, rows: [said("hi")] });
+  channel.stopping = true;
+  await channel.settle();
+  expect(sent).toEqual([]);
 });
 
 test("draft mode shows replies without sending", async () => {

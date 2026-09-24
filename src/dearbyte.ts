@@ -38,7 +38,7 @@ function describeDesktopEvent(e: DesktopEvent): string | null {
 
 function argValue(argv: string[], flag: string): string | null {
   const i = argv.indexOf(flag);
-  return i >= 0 && argv[i + 1] ? argv[i + 1] : null;
+  return i >= 0 && argv[i + 1] && !argv[i + 1].startsWith("--") ? argv[i + 1] : null;
 }
 
 async function main() {
@@ -61,11 +61,18 @@ async function main() {
     process.exit(1);
   }
 
-  // Bind the chat to answer. The first run binds whatever chat is open.
+  // Bind the chat to answer. Binding is always explicit, so 小拜 never starts
+  // answering whichever chat happened to be open.
   const requested = argValue(argv, "--chat");
-  const chat = requested ?? store.getSetting(CHAT_SETTING) ?? open.chat;
+  const chat = requested ?? store.getSetting(CHAT_SETTING);
   if (!chat) {
-    console.error("微信里没有打开的聊天。先在 Mac 微信里点开和你的聊天，再运行。");
+    console.error(
+      open.chat
+        ? `还没绑定聊天。微信当前打开的是「${open.chat}」；确认是和你的一对一聊天后，运行：\n  npm run dearbyte -- --chat ${open.chat}`
+        : "还没绑定聊天。先在 Mac 微信里点开和你的聊天，再运行 npm run dearbyte -- --chat <聊天名字>",
+    );
+    ui.close();
+    store.close();
     process.exit(1);
   }
   if (chat !== store.getSetting(CHAT_SETTING)) {
@@ -119,6 +126,7 @@ async function main() {
   const shutdown = () =>
     (closing ??= (async () => {
       rl?.close();
+      channel.stopping = true; // type nothing more into WeChat
       stop.abort();
       await running;
       await channel.settle(); // replies in flight and the memory work they start
@@ -128,7 +136,8 @@ async function main() {
 
   // Commands need a terminal; without one the bot runs until SIGINT/SIGTERM.
   const rl = process.stdin.isTTY ? createInterface({ input: process.stdin, output: process.stdout }) : null;
-  const interrupt = () => void shutdown().then(() => process.exit(0));
+  // A second Ctrl+C quits at once, without waiting for memory work.
+  const interrupt = () => (closing ? process.exit(130) : void shutdown().then(() => process.exit(0)));
   rl?.on("SIGINT", interrupt);
   process.on("SIGINT", interrupt).on("SIGTERM", interrupt);
 

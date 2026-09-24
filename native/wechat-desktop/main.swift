@@ -20,6 +20,7 @@ func attr(_ e: AXUIElement, _ name: String) -> CFTypeRef? {
 }
 func str(_ e: AXUIElement, _ name: String) -> String? { attr(e, name) as? String }
 func kids(_ e: AXUIElement) -> [AXUIElement] { (attr(e, kAXChildrenAttribute) as? [AXUIElement]) ?? [] }
+func bool(_ e: AXUIElement, _ name: String) -> Bool? { attr(e, name) as? Bool }
 
 func find(_ e: AXUIElement, role: String, description: String? = nil, depth: Int = 0) -> AXUIElement? {
     if str(e, kAXRoleAttribute) == role, description == nil || str(e, kAXDescriptionAttribute) == description { return e }
@@ -34,13 +35,19 @@ struct Chat {
     let app: NSRunningApplication
     let table: AXUIElement
     let composer: AXUIElement
+    let windowCount: Int
     /// The composer's title is the open chat's name.
     var name: String { str(composer, kAXTitleAttribute) ?? "" }
     var draft: String { str(composer, kAXValueAttribute) ?? "" }
 
-    /// Row titles, oldest first: "MeSaid:…", "<name>Said:…", "<name>:Sent aPhoto", time labels, notices.
-    func rows() -> [String] {
-        kids(table)
+    /// Row titles, oldest first: "MeSaid:…", "<nickname>Said:…", "<nickname>:Sent aPhoto", time labels, notices.
+    /// Throws rather than returning a short list when Accessibility doesn't answer,
+    /// so a failed read never looks like an emptied chat.
+    func rows() throws -> [String] {
+        guard let children = attr(table, kAXChildrenAttribute) as? [AXUIElement] else {
+            throw HelperError(message: "read_failed")
+        }
+        return children
             .filter { str($0, kAXRoleAttribute) == "AXRow" }
             .map { kids($0).flatMap { kids($0) }.compactMap { str($0, kAXTitleAttribute) }.joined() }
     }
@@ -58,7 +65,11 @@ func openChat() throws -> Chat {
     let window = w as! AXUIElement
     guard let table = find(window, role: "AXTable", description: "Messages"),
           let composer = find(window, role: "AXTextArea") else { throw HelperError(message: "no_open_chat") }
-    return Chat(app: app, table: table, composer: composer)
+    // Return goes to WeChat's key window. A second (detached chat) window could
+    // take it, so refuse while one is open. The list is empty when WeChat is on
+    // another Space; the checks after Return still catch a misdirected key.
+    let windows = (attr(root, kAXWindowsAttribute) as? [AXUIElement]) ?? []
+    return Chat(app: app, table: table, composer: composer, windowCount: windows.count)
 }
 
 func pressReturn(_ app: NSRunningApplication) {
@@ -73,33 +84,50 @@ func send(chat boundName: String, text: String) throws -> [String: Any] {
     let chat = try openChat()
     guard chat.name == boundName else { throw HelperError(message: "wrong_chat") }
     guard chat.draft.isEmpty else { throw HelperError(message: "composer_not_empty") }
-    let before = chat.rows()
+    guard chat.windowCount <= 1 else { throw HelperError(message: "other_window_open") }
+    let before = try chat.rows()
+    let expected = "MeSaid:\(text)"
+    let tail = 3
 
     guard AXUIElementSetAttributeValue(chat.composer, kAXValueAttribute as CFString, text as CFString) == .success else {
         throw HelperError(message: "fill_failed")
     }
+    // Make the composer the element that receives Return.
+    AXUIElementSetAttributeValue(chat.composer, kAXFocusedAttribute as CFString, kCFBooleanTrue)
     usleep(150_000)
-    // Recheck just before sending: the chat could have changed meanwhile.
-    guard chat.draft == text, chat.name == boundName else {
-        if chat.draft == text { AXUIElementSetAttributeValue(chat.composer, kAXValueAttribute as CFString, "" as CFString) }
-        throw HelperError(message: "changed_before_send")
+    // Recheck just before sending: the chat, draft or focus could have changed meanwhile.
+    guard chat.draft == text, chat.name == boundName, bool(chat.composer, kAXFocusedAttribute) != false else {
+        let code = bool(chat.composer, kAXFocusedAttribute) == false ? "not_focused" : "changed_before_send"
+        clear(chat, text)
+        throw HelperError(message: code)
     }
     pressReturn(chat.app)
 
-    let expected = "MeSaid:\(text)"
+    // Sent means: Return took our text out of the composer, and a new "MeSaid"
+    // row with it is at the bottom. The table can drop rows from the top, so
+    // compare occurrences near the bottom rather than the row count.
+    let beforeCount = before.suffix(tail).filter { $0 == expected }.count
     for _ in 0..<24 {
         usleep(250_000)
-        let rows = chat.rows()
-        if rows.count > before.count, rows.suffix(rows.count - before.count).contains(expected) {
+        guard let rows = try? chat.rows() else { continue }
+        if chat.draft.isEmpty, rows.suffix(tail).filter({ $0 == expected }).count > beforeCount {
             return ["ok": true]
         }
     }
     // Return may or may not have gone through; never retry blindly.
     if chat.draft == text {
-        AXUIElementSetAttributeValue(chat.composer, kAXValueAttribute as CFString, "" as CFString)
+        clear(chat, text)
         throw HelperError(message: "not_sent")
     }
     throw HelperError(message: "unconfirmed")
+}
+
+/// Takes our text back out of the composer, keeping anything a person typed around it.
+func clear(_ chat: Chat, _ text: String) {
+    let draft = chat.draft
+    guard draft.contains(text) else { return }
+    let rest = draft.replacingOccurrences(of: text, with: "")
+    AXUIElementSetAttributeValue(chat.composer, kAXValueAttribute as CFString, rest as CFString)
 }
 
 func reply(_ object: [String: Any]) {
@@ -120,7 +148,7 @@ while let line = readLine() {
         switch cmd {
         case "snapshot":
             let chat = try openChat()
-            reply(["id": id, "ok": true, "chat": chat.name, "rows": chat.rows(), "draft": !chat.draft.isEmpty])
+            reply(["id": id, "ok": true, "chat": chat.name, "rows": try chat.rows(), "draft": !chat.draft.isEmpty])
         case "send":
             guard let boundName = request["chat"] as? String, let text = request["text"] as? String, !text.isEmpty else {
                 throw HelperError(message: "bad_request")

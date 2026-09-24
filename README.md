@@ -21,12 +21,12 @@ You need:
 - **WeChat for Mac 3.8.4 with the English UI, logged in as 小拜.** Don't update it: WeChat 4.x encrypts received images.
 - **Accessibility permission** for your terminal app (System Settings → Privacy & Security → Accessibility).
 - **Swift** (Xcode Command Line Tools). The helper in `native/wechat-desktop/` is built automatically on first run.
-- **The chat with you open** in WeChat's main window, scrolled to the bottom. The window can sit on another desktop (Space), but don't close it.
+- **The chat with you open** in WeChat's main window, scrolled to the bottom. The window can sit on another desktop (Space), but don't close it, and don't open chats in separate windows.
 
 ```bash
-npm run dearbyte                  # answer the chat that is open (bound on first run, remembered after)
+npm run dearbyte -- --chat 张三   # first run: bind the chat to answer (the name shown at the top of the chat)
+npm run dearbyte                  # later runs: the bound chat is remembered
 npm run dearbyte -- --draft       # generate replies in the terminal without sending them
-npm run dearbyte -- --chat 张三  # bind a different chat (the name shown at the top of the chat)
 npm run dearbyte -- --fake        # no model calls; replies are labelled fake
 ```
 
@@ -39,7 +39,7 @@ Then chat with 小拜 from your phone. The terminal shows each message, each bub
 | `/status`, `/help`, `/quit` | Show status, show help, quit |
 
 How it behaves:
-- **Who gets replies:** only the bound one-to-one chat. If you open another chat on the Mac, 小拜 waits until it's back. Messages already in the chat when it starts are never answered.
+- **Who gets replies:** only the bound one-to-one chat. If you open another chat on the Mac, 小拜 waits until it's back. Messages already in the chat when it starts are never answered. If a second person speaks in the chat (a group), it pauses.
 - **Bursts:** several quick messages (within about 1.5 s) become one turn.
 - **Photos:** read from WeChat's local image folder for that chat (`COMPANION_WECHAT_MEDIA_DIR`). Without it, 小拜 is told it can't see the picture. Stickers, voice, video and files are described to 小拜 as things it can't open.
 - **Sending:** the helper types each bubble into the composer and presses Return, then confirms the bubble appeared. It never sends while someone has a draft in the composer, and never resends a bubble it couldn't confirm.

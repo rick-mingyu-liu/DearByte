@@ -3,8 +3,9 @@
 //   <account>/Message/MessageTemp/<chat>/Image/<id>_.pic.jpg   (plus _.pic_thumb.jpg)
 // We only ever read the one folder configured for 小拜's chat.
 
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { lstatSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { MAX_SOURCE_BYTES } from "../../media/images.ts";
 
 const WAIT_MS = 15_000;
 const POLL_MS = 500;
@@ -25,11 +26,18 @@ export class PhotoFolder {
     } catch {
       return [];
     }
-    return names
-      .filter((n) => n.endsWith(".pic.jpg") && !this.claimed.has(n))
-      .map((name) => ({ name, mtime: statSync(join(this.dir, name)).mtimeMs }))
-      .filter((f) => f.mtime >= notBefore)
-      .sort((a, b) => a.mtime - b.mtime);
+    const files: { name: string; mtime: number }[] = [];
+    for (const name of names) {
+      if (!name.endsWith(".pic.jpg") || this.claimed.has(name)) continue;
+      try {
+        const stat = lstatSync(join(this.dir, name));
+        // Regular files only (no symlinks out of the folder), and nothing absurdly large.
+        if (stat.isFile() && stat.size <= MAX_SOURCE_BYTES && stat.mtimeMs >= notBefore) files.push({ name, mtime: stat.mtimeMs });
+      } catch {
+        // Renamed or removed between listing and stat.
+      }
+    }
+    return files.sort((a, b) => a.mtime - b.mtime);
   }
 
   /** Photos already on disk now can never belong to a message we see later. */
@@ -38,18 +46,20 @@ export class PhotoFolder {
   }
 
   /**
-   * Waits for the next unclaimed photo saved at or after `seenAt` (minus a
-   * little slack, since WeChat can save the file before the row appears).
+   * Waits for the `count` photos of a burst, saved at or after `seenAt` (minus
+   * a little slack, since WeChat can save the file before the row appears).
+   * All of them are claimed so none is mistaken for a later photo; the newest
+   * is returned. If fewer arrive in time, the newest of those is returned.
    */
-  async claim(seenAt: number): Promise<Uint8Array> {
+  async claim(seenAt: number, count = 1): Promise<Uint8Array> {
     const sleep = this.opts.sleep ?? ((ms) => new Promise<void>((r) => setTimeout(r, ms)));
     const now = this.opts.now ?? Date.now;
     const deadline = now() + WAIT_MS;
     for (;;) {
-      const [next] = this.candidates(seenAt - 60_000);
-      if (next) {
-        this.claimed.add(next.name);
-        return new Uint8Array(readFileSync(join(this.dir, next.name)));
+      const found = this.candidates(seenAt - 60_000).slice(0, count);
+      if (found.length >= count || (found.length && now() >= deadline)) {
+        for (const f of found) this.claimed.add(f.name);
+        return new Uint8Array(readFileSync(join(this.dir, found.at(-1)!.name)));
       }
       if (now() >= deadline) throw new Error("微信还没把这张图存到本地");
       await sleep(POLL_MS);

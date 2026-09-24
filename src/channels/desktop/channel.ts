@@ -14,7 +14,8 @@ const ERROR_BACKOFF_MS = 5_000;
 const BUSY_RETRIES = 3;
 const BUSY_WAIT_MS = 3_000;
 
-export type PhotoRef = { seenAt: number };
+/** `count` photos arrived in this burst; 小拜 sees the newest. */
+export type PhotoRef = { seenAt: number; count: number };
 export type DesktopMessage = Incoming<PhotoRef>;
 export type Mode = "auto" | "draft";
 
@@ -28,7 +29,12 @@ export class DesktopChannel {
   /** Rows from the last time the bound chat was open. */
   private seen: string[] | null = null;
   private lastStatus = "";
+  /** Nicknames seen sending in the bound chat; more than one means a group. */
+  private readonly senders = new Set<string>();
+  private readonly reportedUnknown = new Set<string>();
   paused = false;
+  /** Set on shutdown: finish the turn in memory, but type nothing more into WeChat. */
+  stopping = false;
 
   constructor(
     private readonly deps: {
@@ -50,7 +56,11 @@ export class DesktopChannel {
       sleep: deps.sleep,
       burstWindowMs: deps.burstWindowMs,
       outlet: {
-        merge: mergeIncoming,
+        merge: (messages) => {
+          const merged = mergeIncoming(messages);
+          const count = messages.filter((m) => m.image).length;
+          return merged.image ? { ...merged, image: { ...merged.image, count } } : merged;
+        },
         loadImage: (ref) => this.loadPhoto(ref),
         sendBubble: (_message, bubble) => this.send(bubble),
       },
@@ -106,9 +116,11 @@ export class DesktopChannel {
       this.status(`已连接「${chat}」，从现在起的新消息会${this.deps.mode === "draft" ? "生成草稿（不发送）" : "自动回复"}`);
       return;
     }
+    // A full chat never really empties between two polls; that's a bad read.
+    if (!snapshot.rows.length && this.seen.length) return;
     this.status("");
 
-    const added = newRows(this.seen, snapshot.rows);
+    const added = newRows(this.seen, snapshot.rows, (old) => parseRow(old).kind === "meta");
     this.seen = snapshot.rows;
     if (added === null) {
       this.emit({ type: "status", message: "聊天记录跳动了（滚动或重新加载），重新对齐；这期间的消息可能漏掉" });
@@ -119,13 +131,25 @@ export class DesktopChannel {
     const messages: DesktopMessage[] = [];
     for (const title of added) {
       const row = parseRow(title);
+      if (row.kind === "text" || row.kind === "photo" || row.kind === "other") this.senders.add(row.sender);
       if (row.kind === "text") messages.push({ text: row.text, image: null });
-      else if (row.kind === "photo") messages.push({ text: "", image: { seenAt: now } });
+      else if (row.kind === "photo") messages.push({ text: "", image: { seenAt: now, count: 1 } });
       else if (row.kind === "other") messages.push({ text: describeOther(row.label), image: null });
+      else if (row.kind === "unknown" && !this.reportedUnknown.has(title)) {
+        this.reportedUnknown.add(title);
+        this.emit({ type: "status", message: `有一行看不懂，没有回复：${title.slice(0, 40)}（微信要用英文界面）` });
+      }
     }
     if (!messages.length) return;
+    if (this.senders.size > 1 && !this.paused) {
+      this.paused = true;
+      this.emit({ type: "status", message: `这个聊天里有不止一个人在说话（${[...this.senders].join("、")}），像是群聊。已暂停，小拜只回一对一聊天` });
+    }
     if (this.paused) {
       this.emit({ type: "skipped", count: messages.length });
+      // Claim the skipped photos so they aren't mistaken for the next one.
+      const photos = messages.filter((m) => m.image).length;
+      if (photos) this.deps.photos?.claim(now, photos).catch(() => {});
       return;
     }
     this.loop.push(messages);
@@ -133,11 +157,15 @@ export class DesktopChannel {
 
   private async loadPhoto(ref: PhotoRef): Promise<Uint8Array> {
     if (!this.deps.photos) throw new Error("没有设置 COMPANION_WECHAT_MEDIA_DIR，读不到图片");
-    return this.deps.photos.claim(ref.seenAt);
+    return this.deps.photos.claim(ref.seenAt, ref.count);
   }
 
-  private async send(bubble: string): Promise<SendResult> {
+  private async send(raw: string): Promise<SendResult> {
     if (this.deps.mode === "draft") return "drafted";
+    if (this.stopping) return "failed";
+    // WeChat trims bubbles, and the helper confirms by exact text.
+    const bubble = raw.trim();
+    if (!bubble) return "sent";
     for (let attempt = 1; ; attempt++) {
       try {
         await this.deps.ui.send(this.deps.chat, bubble);

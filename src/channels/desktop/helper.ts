@@ -38,6 +38,12 @@ const HELPER_MESSAGES: Record<string, string> = {
   changed_before_send: "发送前聊天或输入框变了，已取消",
   not_sent: "按了回车但消息没发出去，已清空输入框",
   unconfirmed: "按了回车但没看到消息出现，不确定是否发出（不会重发）",
+  not_focused: "输入框没拿到焦点，没有发送",
+  other_window_open: "微信开着另一个聊天窗口，回车可能发到那边，没有发送（关掉独立的聊天窗口）",
+  read_failed: "读取聊天记录失败",
+  helper_exited: "微信助手进程退出了，下次会重启",
+  helper_failed: "微信助手进程启动失败",
+  helper_timeout: "微信助手没有响应",
 };
 
 export function ensureHelperBuilt(): string {
@@ -49,13 +55,27 @@ export function ensureHelperBuilt(): string {
 }
 
 export class DesktopHelper implements WechatUi {
-  private readonly child: ChildProcessWithoutNullStreams;
+  private child: ChildProcessWithoutNullStreams | null = null;
   private nextId = 1;
   private readonly waiting = new Map<number, { resolve: (v: any) => void; reject: (e: Error) => void }>();
+  private closed = false;
 
-  constructor(binary = ensureHelperBuilt()) {
-    this.child = spawn(binary, [], { stdio: ["pipe", "pipe", "pipe"] });
-    createInterface({ input: this.child.stdout }).on("line", (line) => {
+  constructor(private readonly binary = ensureHelperBuilt()) {}
+
+  /** Starts the helper, or starts it again after it died. */
+  private process(): ChildProcessWithoutNullStreams {
+    if (this.child) return this.child;
+    const child = spawn(this.binary, [], { stdio: ["pipe", "pipe", "pipe"] });
+    const fail = (code: string) => {
+      if (this.child === child) this.child = null;
+      for (const p of this.waiting.values()) p.reject(new HelperError(code));
+      this.waiting.clear();
+    };
+    child.on("error", () => fail("helper_failed"));
+    child.on("exit", () => fail("helper_exited"));
+    child.stdin.on("error", () => fail("helper_exited"));
+    child.stderr.on("data", (chunk) => process.stderr.write(chunk));
+    createInterface({ input: child.stdout }).on("line", (line) => {
       let msg: { id?: number; ok: boolean; error?: string };
       try {
         msg = JSON.parse(line);
@@ -67,24 +87,25 @@ export class DesktopHelper implements WechatUi {
       this.waiting.delete(msg.id!);
       msg.ok ? pending.resolve(msg) : pending.reject(new HelperError(msg.error ?? "unknown"));
     });
-    this.child.on("exit", () => {
-      for (const p of this.waiting.values()) p.reject(new HelperError("helper_exited"));
-      this.waiting.clear();
-    });
+    this.child = child;
+    return child;
   }
 
   private request<T>(body: object): Promise<T> {
+    if (this.closed) return Promise.reject(new HelperError("helper_exited"));
+    const child = this.process();
     const id = this.nextId++;
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.waiting.delete(id);
         reject(new HelperError("helper_timeout"));
+        child.kill(); // a stuck helper is replaced on the next request
       }, REQUEST_TIMEOUT_MS);
       this.waiting.set(id, {
         resolve: (v) => (clearTimeout(timer), resolve(v)),
         reject: (e) => (clearTimeout(timer), reject(e)),
       });
-      this.child.stdin.write(JSON.stringify({ ...body, id }) + "\n");
+      child.stdin.write(JSON.stringify({ ...body, id }) + "\n");
     });
   }
 
@@ -98,6 +119,7 @@ export class DesktopHelper implements WechatUi {
   }
 
   close(): void {
-    this.child.stdin.end();
+    this.closed = true;
+    this.child?.stdin.end();
   }
 }
