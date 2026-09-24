@@ -10,7 +10,7 @@
 
 import { createInterface } from "node:readline/promises";
 import { DesktopChannel, type DesktopEvent } from "./channels/desktop/channel.ts";
-import { DesktopHelper } from "./channels/desktop/helper.ts";
+import { DesktopHelper, HelperError } from "./channels/desktop/helper.ts";
 import { PhotoFolder } from "./channels/desktop/photos.ts";
 import { Companion } from "./companion/companion.ts";
 import { dayState, planProactive, type ProactiveState } from "./companion/proactive.ts";
@@ -61,19 +61,25 @@ async function main() {
 
   const ui = new DesktopHelper();
   const store = Store.open(config.dbPath);
-  let open;
-  try {
-    open = await ui.snapshot();
-  } catch (err) {
-    console.error(`连不上微信：${(err as Error).message}`);
-    ui.close();
-    process.exit(1);
-  }
-
   // Bind the chat to answer. Binding is always explicit, so 小拜 never starts
   // answering whichever chat happened to be open.
   const requested = argValue(argv, "--chat");
   const chat = requested ?? store.getSetting(CHAT_SETTING);
+
+  let open = { chat: "" };
+  try {
+    open = await ui.snapshot();
+  } catch (err) {
+    // With a bound chat, wait for it like the poll loop does. Binding needs
+    // WeChat now, and a missing permission won't fix itself.
+    if (!chat || (err instanceof HelperError && err.code === "no_accessibility_permission")) {
+      console.error(`连不上微信：${(err as Error).message}`);
+      ui.close();
+      store.close();
+      process.exit(1);
+    }
+  }
+
   if (!chat) {
     console.error(
       open.chat
