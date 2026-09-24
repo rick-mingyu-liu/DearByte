@@ -8,6 +8,7 @@
 //   npm run dearbyte -- --memory on  # long-term memory on (or off); saved
 //   npm run dearbyte -- --proactive off  # 小拜 never writes first (on by default); saved
 
+import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { DesktopChannel, type DesktopEvent } from "./channels/desktop/channel.ts";
@@ -17,6 +18,7 @@ import { Companion } from "./companion/companion.ts";
 import { dayState, planProactive, type ProactiveState } from "./companion/proactive.ts";
 import { loadPromptParts } from "./companion/prompt.ts";
 import { localDate } from "./companion/time.ts";
+import { systemNotifier, Watchdog } from "./alerts.ts";
 import { loadConfig, ROOT } from "./config.ts";
 import { loadContacts, saveContacts } from "./contacts.ts";
 import { COMMON_HELP, describeEvent, describeReplyEvent, log, runSharedCommand } from "./console.ts";
@@ -43,6 +45,8 @@ function describeDesktopEvent(e: DesktopEvent): string | null {
       return e.message;
     case "skipped":
       return `暂停中，${e.count} 条新消息没有回复`;
+    case "send_failed":
+      return `发送失败：${e.message}`;
     default:
       return describeReplyEvent(e);
   }
@@ -145,6 +149,7 @@ async function main() {
       if (line) log(line);
     },
   });
+  const watchdog = new Watchdog({ notify: systemNotifier(config.alertUrl, log) });
   const channel = new DesktopChannel({
     ui,
     companion,
@@ -152,6 +157,7 @@ async function main() {
     photos,
     mode: argv.includes("--draft") ? "draft" : "auto",
     onEvent: (e) => {
+      if (e.type === "send_failed") watchdog.sendFailed(e.message);
       const line = describeDesktopEvent(e);
       if (!line) return;
       if (e.type === "inbound" || e.type === "sent" || e.type === "drafted") console.log(line);
@@ -198,11 +204,18 @@ async function main() {
     }
   };
   const ticker = setInterval(() => void tick(), PROACTIVE_TICK_MS);
+  const watching = setInterval(() => watchdog.check(channel.problem), 5_000);
+  // Keep the Mac from idle-sleeping while 小拜 runs; ends with this process.
+  // The display may still sleep: reading WeChat doesn't need it.
+  spawn("caffeinate", ["-i", "-w", String(process.pid)], { stdio: "ignore" })
+    .on("error", () => log("没能阻止 Mac 休眠（caffeinate 不可用）：请在系统设置里关掉自动休眠"))
+    .unref();
   let closing: Promise<void> | undefined;
   const shutdown = () =>
     (closing ??= (async () => {
       rl?.close();
       clearInterval(ticker);
+      clearInterval(watching);
       channel.stopping = true; // type nothing more into WeChat
       stop.abort();
       await running;

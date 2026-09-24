@@ -301,7 +301,8 @@ test("waits out a draft in the composer, but never resends an unconfirmed bubble
   unsure.channel.poll({ chat: CHAT, rows: [said("hi")] });
   await unsure.channel.settle();
   expect(unsure.sent).toEqual([]);
-  expect(unsure.events.filter((e) => e.type === "error")).toHaveLength(2);
+  expect(unsure.events.filter((e) => e.type === "send_failed")).toHaveLength(1);
+  expect(unsure.events.filter((e) => e.type === "error")).toHaveLength(1); // the rest of the reply is dropped
 });
 
 test("a message arriving mid-reply becomes the next turn", async () => {
@@ -363,4 +364,22 @@ test("a chat with a name not in the list is never answered", async () => {
   channel.poll({ chat: "别人", rows: [said("早"), said("在吗")] });
   await channel.settle();
   expect(sent).toEqual([]);
+});
+
+test("the channel reports a problem while another chat is open, and clears it when back", () => {
+  const { channel } = setup();
+  channel.poll({ chat: CHAT, rows: [said("早")] });
+  expect(channel.problem).toBeNull();
+  channel.poll({ chat: "别人", rows: [] });
+  expect(channel.problem).toContain("别人");
+  channel.poll({ chat: CHAT, rows: [said("早")] });
+  expect(channel.problem).toBeNull();
+});
+
+test("a bubble that can't be sent is reported as a send failure", async () => {
+  const { channel, events } = setup({ responses: [reply("在")], sendErrors: ["not_sent"] });
+  channel.poll({ chat: CHAT, rows: [] });
+  channel.poll({ chat: CHAT, rows: [said("在吗")] });
+  await channel.settle();
+  expect(events.some((e) => e.type === "send_failed")).toBe(true);
 });

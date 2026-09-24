@@ -11,6 +11,8 @@ export type Config = {
   historyMessages: number;
   /** Folder where WeChat for Mac saves photos received in 小拜's chat. */
   wechatMediaDir: string | null;
+  /** Optional push URL (e.g. https://ntfy.sh/<topic>) for alerts when 小拜 gets stuck. */
+  alertUrl: string | null;
 };
 
 // Minimal .env reader: KEY=value lines, optional quotes. Real env vars win.
@@ -33,5 +35,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     timeZone: merged.COMPANION_TZ || Intl.DateTimeFormat().resolvedOptions().timeZone,
     historyMessages: Number(merged.COMPANION_HISTORY_MESSAGES || 40),
     wechatMediaDir: merged.COMPANION_WECHAT_MEDIA_DIR || null,
+    alertUrl: merged.COMPANION_ALERT_URL || null,
   };
 }

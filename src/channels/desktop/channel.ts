@@ -22,7 +22,8 @@ export type Mode = "auto" | "draft";
 export type DesktopEvent =
   | ReplyEvent
   | { type: "status"; message: string }
-  | { type: "skipped"; count: number };
+  | { type: "skipped"; count: number }
+  | { type: "send_failed"; message: string };
 
 export class DesktopChannel {
   private readonly loop: ReplyLoop<DesktopMessage>;
@@ -34,6 +35,8 @@ export class DesktopChannel {
   /** Nicknames seen sending in the bound chat; more than one means a group. */
   private readonly senders = new Set<string>();
   private readonly reportedUnknown = new Set<string>();
+  /** Why 小拜 can't read the chat right now, or null when it's in sync. */
+  problem: string | null = null;
   paused = false;
   /** Set on shutdown: finish the turn in memory, but type nothing more into WeChat. */
   stopping = false;
@@ -114,7 +117,8 @@ export class DesktopChannel {
       try {
         this.poll(await this.deps.ui.snapshot());
       } catch (err) {
-        this.status(`读取微信失败：${(err as Error).message}`);
+        this.problem = `读取微信失败：${(err as Error).message}`;
+        this.status(this.problem);
         wait = ERROR_BACKOFF_MS;
       }
       if (!signal.aborted) await this.sleep(wait);
@@ -126,9 +130,11 @@ export class DesktopChannel {
     const { names } = this.deps;
     const chat = snapshot.chat;
     if (!names.includes(chat)) {
-      this.status(`微信当前打开的是「${chat || "（无）"}」，不是「${names.join("」「")}」；切回去之前不会回复`);
+      this.problem = `微信当前打开的是「${chat || "（无）"}」，不是「${names.join("」「")}」；切回去之前不会回复`;
+      this.status(this.problem);
       return;
     }
+    this.problem = null;
     this.openName = chat;
     if (this.seen === null) {
       this.seen = snapshot.rows;
@@ -202,7 +208,7 @@ export class DesktopChannel {
           await this.sleep(BUSY_WAIT_MS);
           continue;
         }
-        this.emit({ type: "error", message: `发送失败：${(err as Error).message}` });
+        this.emit({ type: "send_failed", message: (err as Error).message });
         return "failed";
       }
     }
