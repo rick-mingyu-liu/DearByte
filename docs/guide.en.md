@@ -13,7 +13,7 @@ A Chinese-speaking AI companion, 小拜 (傲娇但细心, a tsundere girl), with
 
 ## Setup
 
-Requires Node 24+; 26 is recommended (`nvm use` picks it from `.nvmrc`). CI tests both.
+Requires Node 26+ (`nvm use` picks it from `.nvmrc`).
 
 ```bash
 npm install

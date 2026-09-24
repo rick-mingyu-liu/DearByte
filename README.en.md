@@ -9,7 +9,7 @@
 <p align="center">
 <a href="https://github.com/rick-mingyu-liu/DearByte/stargazers"><img src="https://img.shields.io/github/stars/rick-mingyu-liu/DearByte?style=flat" alt="GitHub Stars"></a>
 <img src="https://img.shields.io/badge/status-experimental-orange" alt="Status: experimental">
-<img src="https://img.shields.io/badge/Node.js-24%2B-339933" alt="Node.js 24+">
+<img src="https://img.shields.io/badge/Node.js-26%2B-339933" alt="Node.js 26+">
 </p>
 
 <p align="center"><a href="#quick-start">Quick start</a> · <a href="docs/guide.en.md">User guide</a> · <a href="#data-and-privacy">Data and privacy</a> · <a href="#contributing">Contributing</a></p>
@@ -34,7 +34,7 @@ If this sounds like your kind of companion, leave a ⭐ Star and follow Xiaobai'
 
 ## Quick start
 
-Requires **Node.js 24+** (26 recommended; the repo's `.nvmrc` says 26). Meet Xiaobai in your terminal first:
+Requires **Node.js 26+** (with nvm, run `nvm use` in the repo). Meet Xiaobai in your terminal first:
 
 ```bash
 git clone https://github.com/rick-mingyu-liu/DearByte.git

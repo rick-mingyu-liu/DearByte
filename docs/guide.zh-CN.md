@@ -6,7 +6,7 @@
 
 ## 终端聊天
 
-需要 Node.js 24+，推荐 26（在项目目录里 `nvm use` 会按 `.nvmrc` 切到 26），CI 两个版本都会测。安装与密钥配置见[快速开始](../README.md#快速开始)。
+需要 Node.js 26+（在项目目录里 `nvm use` 会按 `.nvmrc` 切到 26）。安装与密钥配置见[快速开始](../README.md#快速开始)。
 
 ```bash
 npm run companion
