@@ -165,3 +165,20 @@ test("createModel wraps the model in the spending cap", () => {
   expect(m.constructor.name).toBe("BudgetedModel");
   expect(m.name).toBe("deepseek-flash");
 });
+
+test("a call that needs no reasoning turns it off where the provider can, and drops it if rejected", async () => {
+  const calls = stubFetch(
+    { body: { choices: [{ message: { content: "{}" } }], usage: {} } },
+    { status: 400, body: { error: { message: "Unrecognized request argument supplied: thinking" } } },
+    { body: { choices: [{ message: { content: "{}" } }], usage: {} } },
+  );
+  const deepseek = ok(resolveModel({ DEEPSEEK_API_KEY: "k" }));
+  expect(deepseek.skipThinking).toEqual({ thinking: { type: "disabled" } });
+  const m = new OpenAICompatibleModel({ label: "DeepSeek", name: "m", baseUrl: "https://x", apiKey: "k", vision: false, prices, skipThinking: deepseek.skipThinking });
+  await m.complete([{ role: "user", content: "hi" }], { json: true, thinking: false });
+  expect(calls[0].body.thinking).toEqual({ type: "disabled" });
+  await m.complete([{ role: "user", content: "hi" }], { json: true, thinking: false });
+  expect(calls[2].body).not.toHaveProperty("thinking"); // rejected once, then left out
+  // Normal calls, and providers without such a field, never send it.
+  expect(ok(resolveModel({ COMPANION_PROVIDER: "openai", COMPANION_MODEL: "gpt-4o", COMPANION_API_KEY: "k", COMPANION_PRICE_INPUT: "1", COMPANION_PRICE_OUTPUT: "1" })).skipThinking).toBeUndefined();
+});

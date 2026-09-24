@@ -1,6 +1,7 @@
 import type { ChatMessage, ImageInput, StoredMessage } from "../domain.ts";
 import { extractFacts, type ExtractionOutcome } from "../memory/extract.ts";
-import { SUMMARY_SETTING, updateSummary, type SummaryOutcome } from "../memory/summary.ts";
+import { SUMMARY_SETTING, SummaryFailed, updateSummary, type SummaryOutcome } from "../memory/summary.ts";
+
 import type { ChatModel, Completion } from "../model/provider.ts";
 import type { Store } from "../storage/store.ts";
 import { FALLBACK_REPLY, parseReply, type Reply } from "./output.ts";
@@ -10,6 +11,9 @@ import { withTurnBudget } from "../model/budget.ts";
 import { emojiRecently, userEnergy } from "./energy.ts";
 import { looksLikeCrisis } from "./safety.ts";
 import { localDate } from "./time.ts";
+
+/** How long to wait after a summary fold fails before trying again. */
+const SUMMARY_RETRY_MS = 30 * 60_000;
 
 /** When the last crisis turn was (ISO), by keywords or the model; proactive messages stay gentle after it. */
 export const CRISIS_AT_SETTING = "crisis_at";
@@ -61,6 +65,8 @@ export class Companion {
 
   /** The last summary fold; the next one waits for it. */
   private summaries: Promise<unknown> = Promise.resolve();
+  /** After a failed fold, no new attempt before this time (ms), so a failing fold isn't paid for every turn. */
+  private summaryRetryAt = 0;
 
   private emit(event: CompanionEvent) {
     this.deps.onEvent?.(event);
@@ -146,10 +152,18 @@ export class Companion {
           .then(async (outcome) => {
             // Messages that just left the window get folded into the summary,
             // one fold at a time so two turns can't fold the same span.
+            const at = () => (this.deps.now?.() ?? new Date()).getTime();
+            if (at() < this.summaryRetryAt) return outcome;
             const fold = this.summaries.then(() => updateSummary({ model: trackedModel, store, window: this.deps.historyMessages, timeZone }));
             this.summaries = fold.catch(() => null);
-            const folded = await fold;
-            if (folded) this.emit({ type: "summary", outcome: folded });
+            try {
+              const folded = await fold;
+              if (folded) this.emit({ type: "summary", outcome: folded });
+            } catch (err) {
+              if (!(err instanceof SummaryFailed)) throw err;
+              this.summaryRetryAt = at() + SUMMARY_RETRY_MS;
+              this.emit({ type: "memory_error", message: `${err.message}，${SUMMARY_RETRY_MS / 60_000} 分钟后再试` });
+            }
             return outcome;
           })
           .catch((err: Error) => {

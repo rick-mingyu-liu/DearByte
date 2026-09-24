@@ -17,15 +17,32 @@ type Preset = {
   vision: boolean;
   /** Runs locally and costs nothing. */
   free?: boolean;
+  /** Request fields that turn the model's reasoning off, for calls that don't need it. */
+  skipThinking?: Record<string, unknown>;
   defaultModel?: string;
 };
 
 export const PROVIDERS: Record<string, Preset> = {
-  deepseek: { label: "DeepSeek", baseUrl: "https://api.deepseek.com", keyEnv: ["DEEPSEEK_API_KEY"], api: "openai", vision: true, defaultModel: "deepseek-flash" },
+  deepseek: {
+    label: "DeepSeek",
+    baseUrl: "https://api.deepseek.com",
+    keyEnv: ["DEEPSEEK_API_KEY"],
+    api: "openai",
+    vision: true,
+    defaultModel: "deepseek-flash",
+    skipThinking: { thinking: { type: "disabled" } },
+  },
   openai: { label: "OpenAI", baseUrl: "https://api.openai.com/v1", keyEnv: ["OPENAI_API_KEY"], api: "openai", vision: true },
   anthropic: { label: "Anthropic", baseUrl: "https://api.anthropic.com", keyEnv: ["ANTHROPIC_API_KEY"], api: "anthropic", vision: true },
   gemini: { label: "Gemini", baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai", keyEnv: ["GEMINI_API_KEY", "GOOGLE_API_KEY"], api: "openai", vision: true },
-  qwen: { label: "Qwen", baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1", keyEnv: ["DASHSCOPE_API_KEY"], api: "openai", vision: false },
+  qwen: {
+    label: "Qwen",
+    baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    keyEnv: ["DASHSCOPE_API_KEY"],
+    api: "openai",
+    vision: false,
+    skipThinking: { enable_thinking: false },
+  },
   moonshot: { label: "Kimi", baseUrl: "https://api.moonshot.cn/v1", keyEnv: ["MOONSHOT_API_KEY"], api: "openai", vision: false },
   zhipu: { label: "GLM", baseUrl: "https://open.bigmodel.cn/api/paas/v4", keyEnv: ["ZHIPU_API_KEY"], api: "openai", vision: false },
   openrouter: { label: "OpenRouter", baseUrl: "https://openrouter.ai/api/v1", keyEnv: ["OPENROUTER_API_KEY"], api: "openai", vision: false },
@@ -54,6 +71,8 @@ export type ModelSettings = {
   prices: Prices;
   /** USD per reply and everything it sets off; 0 turns the cap off. */
   maxCostPerReply: number;
+  /** Request fields that turn reasoning off, when the provider has them. */
+  skipThinking?: Record<string, unknown>;
 };
 
 /** Reads the model settings from env; returns what's wrong instead when they're incomplete. */
@@ -104,6 +123,7 @@ export function resolveModel(env: Record<string, string | undefined>): ModelSett
     vision,
     prices,
     maxCostPerReply: cap,
+    ...(preset.skipThinking ? { skipThinking: preset.skipThinking } : {}),
   };
 }
 
@@ -134,6 +154,6 @@ export function createModel(s: ModelSettings): ChatModel {
   const inner =
     s.api === "anthropic"
       ? new AnthropicModel({ name: s.model, baseUrl: s.baseUrl, apiKey: s.apiKey!, vision: s.vision, prices: s.prices })
-      : new OpenAICompatibleModel({ label: s.label, name: s.model, baseUrl: s.baseUrl, apiKey: s.apiKey, vision: s.vision, prices: s.prices });
+      : new OpenAICompatibleModel({ label: s.label, name: s.model, baseUrl: s.baseUrl, apiKey: s.apiKey, vision: s.vision, prices: s.prices, skipThinking: s.skipThinking });
   return new BudgetedModel(inner, s.prices, s.maxCostPerReply);
 }

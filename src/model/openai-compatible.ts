@@ -5,7 +5,7 @@ import type { ChatMessage } from "../domain.ts";
 import { costAt, DEFAULT_MAX_TOKENS, ModelHttpError, type ChatModel, type CompleteOptions, type Completion, type Prices, type Usage } from "./provider.ts";
 
 /** Parameters some models reject; each is dropped (or renamed) once, then remembered. */
-type Quirk = "temperature" | "max_tokens" | "response_format";
+type Quirk = "temperature" | "max_tokens" | "response_format" | "thinking";
 
 export class OpenAICompatibleModel implements ChatModel {
   readonly name: string;
@@ -13,7 +13,16 @@ export class OpenAICompatibleModel implements ChatModel {
   private readonly quirks = new Set<Quirk>();
 
   constructor(
-    private readonly o: { label: string; name: string; baseUrl: string; apiKey: string | null; vision: boolean; prices: Prices },
+    private readonly o: {
+      label: string;
+      name: string;
+      baseUrl: string;
+      apiKey: string | null;
+      vision: boolean;
+      prices: Prices;
+      /** Fields that turn reasoning off (the provider's own names). */
+      skipThinking?: Record<string, unknown>;
+    },
   ) {
     this.name = o.name;
     this.vision = o.vision;
@@ -27,6 +36,7 @@ export class OpenAICompatibleModel implements ChatModel {
       // Newer OpenAI models only accept max_completion_tokens.
       body[this.quirks.has("max_tokens") ? "max_completion_tokens" : "max_tokens"] = opts.maxTokens ?? DEFAULT_MAX_TOKENS;
       if (opts.json && !this.quirks.has("response_format")) body.response_format = { type: "json_object" };
+      if (opts.thinking === false && this.o.skipThinking && !this.quirks.has("thinking")) Object.assign(body, this.o.skipThinking);
 
       const res = await fetch(`${this.o.baseUrl.replace(/\/$/, "")}/chat/completions`, {
         method: "POST",
@@ -84,6 +94,7 @@ export function rejectedParameter(message: string): Quirk | null {
   if (/max_completion_tokens/.test(message)) return "max_tokens";
   if (/temperature/.test(message)) return "temperature";
   if (/response_format|json_object|json mode/i.test(message)) return "response_format";
+  if (/thinking/i.test(message)) return "thinking";
   return null;
 }
 

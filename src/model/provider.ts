@@ -17,6 +17,12 @@ export type CompleteOptions = {
   temperature?: number;
   maxTokens?: number;
   signal?: AbortSignal;
+  /**
+   * false: this call doesn't need the model to reason first (a summary, say),
+   * so skip it where the provider allows. Reasoning models can otherwise spend
+   * thousands of tokens thinking before a short answer.
+   */
+  thinking?: boolean;
 };
 
 /** Output cap when a caller doesn't set one. Reasoning models count their hidden thinking here. */

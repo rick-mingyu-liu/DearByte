@@ -23,7 +23,7 @@ What could make DearByte better, roughly in the order worth doing. [how-it-works
 | What | Why | Size |
 |---|---|---|
 | Memory search | Every fact goes into every prompt. Past about 100 facts, pick the relevant ones instead (SQLite FTS5 first; embeddings only if that isn't enough). | M |
-| Longer-range summary | The rolling summary is 400 characters, so weeks of chat blur. Keep a weekly summary as well, and fold older weeks into a "long ago" line. | M |
+| Longer-range summary | The rolling summary is about 400 characters, so weeks of chat blur. Keep a weekly summary as well, and fold older weeks into a "long ago" line. | M |
 | Memory per contact | Needed before 小拜 can talk to more than one person. Each contact gets their own facts, summary and proactive state, plus switching between chats in WeChat. | L |
 
 ## Reliability

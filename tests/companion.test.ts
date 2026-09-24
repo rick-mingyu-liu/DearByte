@@ -147,3 +147,14 @@ test("only the bubbles that were sent are stored", async () => {
   expect(none.commit([])).toBeNull();
   expect(store.recentMessages(10).map((m) => m.text)).toEqual(["在吗", "在的", "？"]);
 });
+
+test("a summary fold that fails is logged and not retried every turn", async () => {
+  const { store, model, events, companion } = setup([reply("嗯"), facts(), "not json", reply("好"), facts()], true);
+  // 60 old messages: 20 have left the 40-message window, enough to fold.
+  for (let i = 0; i < 60; i++) store.addMessage(i % 2 ? "assistant" : "user", `旧消息${i}`, { createdAt: new Date(Date.UTC(2026, 8, 20, 0, i)).toISOString() });
+  await (await companion.handle({ text: "在吗" })).memory;
+  await (await companion.handle({ text: "今天好累" })).memory;
+  const folds = model.calls.filter((c) => JSON.stringify(c.messages[0]).includes("备忘"));
+  expect(folds).toHaveLength(1);
+  expect(events.some((e) => e.type === "memory_error" && e.message.includes("摘要没写成") && e.message.includes("30 分钟后再试"))).toBe(true);
+});

@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import { buildSystemPrompt, loadPromptParts } from "../src/companion/prompt.ts";
 import { ROOT } from "../src/config.ts";
-import { SUMMARY_SETTING, SUMMARY_UPTO_SETTING, updateSummary } from "../src/memory/summary.ts";
+import { SUMMARY_SETTING, SUMMARY_UPTO_SETTING, SummaryFailed, updateSummary } from "../src/memory/summary.ts";
 import { FakeModel } from "../src/model/fake.ts";
 import { Store } from "../src/storage/store.ts";
 
@@ -38,19 +38,19 @@ test("folds messages once enough have left the window, and only those", async ()
   expect(second).not.toContain("消息10\n");
 });
 
-test("unusable output keeps the old summary and position", async () => {
+test("unusable output fails loudly and keeps the old summary and position", async () => {
   const store = withMessages(50);
   store.setSettings({ [SUMMARY_SETTING]: "旧的", [SUMMARY_UPTO_SETTING]: "0" });
-  expect(await updateSummary({ model: new FakeModel(["not json"]), store, window: 40, timeZone: "UTC" })).toBeNull();
-  expect(await updateSummary({ model: new FakeModel([summaryOf("")]), store, window: 40, timeZone: "UTC" })).toBeNull();
+  await expect(updateSummary({ model: new FakeModel(["not json"]), store, window: 40, timeZone: "UTC" })).rejects.toBeInstanceOf(SummaryFailed);
+  await expect(updateSummary({ model: new FakeModel([summaryOf("")]), store, window: 40, timeZone: "UTC" })).rejects.toBeInstanceOf(SummaryFailed);
   expect(store.getSetting(SUMMARY_SETTING)).toBe("旧的");
   expect(store.getSetting(SUMMARY_UPTO_SETTING)).toBe("0");
 });
 
 test("a long summary is cut to the limit", async () => {
   const store = withMessages(50);
-  const out = await updateSummary({ model: new FakeModel([summaryOf("长".repeat(700))]), store, window: 40, timeZone: "UTC" });
-  expect(out?.chars).toBe(400);
+  const out = await updateSummary({ model: new FakeModel([summaryOf("长".repeat(1000))]), store, window: 40, timeZone: "UTC" });
+  expect(out?.chars).toBe(600);
 });
 
 test("clearing history resets the summary; forgetting a fact drops its text", () => {
@@ -142,4 +142,11 @@ test("a fold is discarded if another process moved the summary meanwhile", async
   ]);
   expect(await updateSummary({ model, store, window: 40, timeZone: "UTC" })).toBeNull();
   expect(store.getSetting(SUMMARY_UPTO_SETTING)).toBe("10");
+});
+
+test("the summary asks the model not to reason first", async () => {
+  const store = withMessages(50);
+  const model = new FakeModel([summaryOf("聊了天气")]);
+  await updateSummary({ model, store, window: 40, timeZone: "UTC" });
+  expect(model.calls[0].opts.thinking).toBe(false);
 });
