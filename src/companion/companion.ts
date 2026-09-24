@@ -3,7 +3,7 @@ import { extractFacts, type ExtractionOutcome } from "../memory/extract.ts";
 import type { ChatModel, Completion } from "../model/provider.ts";
 import type { Store } from "../storage/store.ts";
 import { FALLBACK_REPLY, parseReply, type Reply } from "./output.ts";
-import { buildMessages, buildSystemPrompt, factsForPrompt, type PromptParts } from "./prompt.ts";
+import { buildMessages, buildSystemPrompt, factsForPrompt, recentPhrases, type PromptParts } from "./prompt.ts";
 import { looksLikeCrisis } from "./safety.ts";
 import { localDate } from "./time.ts";
 
@@ -59,7 +59,7 @@ export class Companion {
     const crisis = looksLikeCrisis(input.text);
     this.emit({ type: "context", historyMessages: history.length, facts: facts.length, memoryEnabled, crisis, image: Boolean(input.image) });
 
-    const system = buildSystemPrompt(parts, { now, timeZone, memoryEnabled, facts, crisis });
+    const system = buildSystemPrompt(parts, { now, timeZone, memoryEnabled, facts, crisis, recent: recentPhrases(history) });
     const messages = buildMessages(system, history, input);
     const reply = await this.generate(messages);
 

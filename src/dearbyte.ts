@@ -157,7 +157,7 @@ async function main() {
         channel.paused = true;
         log("已暂停：新消息跳过，不回复（/resume 恢复）");
       } else if (line === "/resume") {
-        channel.paused = false;
+        channel.resume();
         log("已恢复自动回复。暂停期间的消息不会补回");
       } else if (!(await runSharedCommand(line, { store, timeZone: config.timeZone, settle }))) {
         log(line.startsWith("/") ? `未知命令 ${line.split(/\s+/)[0]}，输入 /help 查看` : "这里只能输入命令，聊天请用手机微信发给小拜");

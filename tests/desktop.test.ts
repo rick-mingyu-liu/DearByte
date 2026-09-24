@@ -209,6 +209,27 @@ test("a message that changes in place is not answered twice", async () => {
   expect(model.calls).toHaveLength(0);
 });
 
+test("a row that reads blank once is not answered again when it reads properly", async () => {
+  const { channel, model } = setup({ responses: [reply("好")] });
+  channel.poll({ chat: CHAT, rows: ["00:01", said("hi")] });
+  channel.poll({ chat: CHAT, rows: ["00:01", ""] });
+  channel.poll({ chat: CHAT, rows: ["00:01", said("hi")] });
+  await channel.settle();
+  expect(model.calls).toHaveLength(0);
+});
+
+test("resume lifts a group-chat pause for good", async () => {
+  const { channel, model } = setup({ responses: [reply("好")] });
+  channel.poll({ chat: CHAT, rows: [] });
+  channel.poll({ chat: CHAT, rows: [said("hi"), "Alex2Said:hello"] });
+  expect(channel.paused).toBe(true);
+  channel.resume();
+  channel.poll({ chat: CHAT, rows: [said("hi"), "Alex2Said:hello", said("还在吗")] });
+  await channel.settle();
+  expect(channel.paused).toBe(false);
+  expect(model.calls).toHaveLength(1);
+});
+
 test("a second sender means a group chat: it pauses instead of answering", async () => {
   const { channel, model, events } = setup();
   channel.poll({ chat: CHAT, rows: [] });

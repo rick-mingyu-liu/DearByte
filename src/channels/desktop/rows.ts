@@ -39,21 +39,19 @@ export function parseRow(title: string): Row {
 const MAX_DROPPED = 50;
 
 /**
- * Rows that are new since the last snapshot, or null if the two snapshots
- * don't line up (the chat was scrolled, switched, reloaded or read badly).
+ * How the new snapshot lines up with the previous one: the number of rows
+ * dropped from the top, or null if they don't line up (the chat was scrolled,
+ * switched, reloaded or read badly).
  *
  * The table may drop old rows from the top as new ones arrive, and a row can
  * change in place while it loads (a photo, a time label). So we try each
- * number of rows dropped from the top and keep the alignment where the most
- * positions match; it must match at least half the overlap. Repeated identical
- * messages stay distinct because positions, not texts, are compared.
- *
- * A changed row counts as new only if `wasPending(oldTitle)` says its old value
- * was a placeholder. A message that was already there is never answered twice.
+ * number of dropped rows and keep the alignment where the most positions
+ * match; it must match at least half the overlap. Repeated identical messages
+ * stay distinct because positions, not texts, are compared.
  */
-export function newRows(previous: string[], next: string[], wasPending: (title: string) => boolean = () => true): string[] | null {
+export function alignRows(previous: string[], next: string[]): number | null {
   // An empty chat that gains a few rows is real; an empty read of a full chat isn't.
-  if (!previous.length) return next.length <= 3 ? next : null;
+  if (!previous.length) return next.length <= 3 ? 0 : null;
   if (!next.length) return null;
   let best = { dropped: -1, score: 0 };
   for (let dropped = 0; dropped < Math.min(previous.length, MAX_DROPPED + 1); dropped++) {
@@ -62,10 +60,31 @@ export function newRows(previous: string[], next: string[], wasPending: (title: 
     for (let i = 0; i < overlap; i++) if (previous[dropped + i] === next[i]) score++;
     if (score > best.score && score * 2 >= overlap) best = { dropped, score };
   }
-  if (best.dropped < 0) return null;
-  const overlap = Math.min(previous.length - best.dropped, next.length);
-  const changed = next.slice(0, overlap).filter((row, i) => row !== previous[best.dropped + i] && wasPending(previous[best.dropped + i]));
+  return best.dropped < 0 ? null : best.dropped;
+}
+
+/**
+ * Rows that are new since the last snapshot, or null if the snapshots don't
+ * line up. A changed row counts as new only if `wasPending(oldTitle)` says its
+ * old value was a placeholder, so a message already there is never answered twice.
+ */
+export function newRows(previous: string[], next: string[], wasPending: (title: string) => boolean = () => true): string[] | null {
+  const dropped = alignRows(previous, next);
+  if (dropped === null) return null;
+  const overlap = Math.min(previous.length - dropped, next.length);
+  const changed = next.slice(0, overlap).filter((row, i) => row !== previous[dropped + i] && wasPending(previous[dropped + i]));
   return [...changed, ...next.slice(overlap)];
+}
+
+/**
+ * The rows to remember for the next diff. A row that reads blank this time
+ * (a partial Accessibility read) keeps its previous text, so when it reads
+ * properly again it isn't mistaken for a new message.
+ */
+export function rememberRows(previous: string[], next: string[]): string[] {
+  const dropped = alignRows(previous, next);
+  if (dropped === null) return next;
+  return next.map((row, i) => (row === "" && previous[dropped + i] !== undefined ? previous[dropped + i] : row));
 }
 
 /** How an unfamiliar item is described to 小拜 so it answers honestly. */

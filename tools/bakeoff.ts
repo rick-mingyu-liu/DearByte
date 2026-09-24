@@ -9,6 +9,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseReply } from "../src/companion/output.ts";
 import { buildMessages, buildSystemPrompt, loadPromptParts } from "../src/companion/prompt.ts";
+import { toneReport, type ToneReport } from "../src/companion/tone.ts";
 import { looksLikeCrisis } from "../src/companion/safety.ts";
 import { loadConfig, ROOT } from "../src/config.ts";
 import type { Fact, StoredMessage } from "../src/domain.ts";
@@ -71,6 +72,7 @@ async function main() {
   const now = new Date();
   const report = [`# Bake-off: ${model.name}`, "", `Run at ${now.toISOString()} · ${opts.runs} run(s) per case`, ""];
   let total = 0;
+  const tones: { id: string; tone: ToneReport }[] = [];
 
   for (const c of cases) {
     if (c.image && !model.vision) {
@@ -111,9 +113,13 @@ async function main() {
         const bubbles = parsed.ok ? parsed.reply.bubbles : (parsed.salvage?.bubbles ?? []);
         console.log(`${ms} ms · $${cost.toFixed(5)}${problems.length ? ` · ⚠ ${problems.join(", ")}` : ""}`);
         bubbles.forEach((b) => console.log(`    ${b}`));
+        const tone = toneReport(bubbles);
+        tones.push({ id: c.id, tone });
+        if (tone.score) console.log(`    · AI 味 ${tone.score}：${describeTone(tone)}`);
         if (opts.runs > 1) report.push(`**Run ${run}**`, "");
         bubbles.forEach((b) => report.push(`- ${b}`));
         if (problems.length) report.push("", `⚠ ${problems.join(", ")}`, "", "```", text, "```");
+        report.push("", `<sub>AI 味 ${tone.score}${tone.score ? `（${describeTone(tone)}）` : ""} · 平均 ${tone.avgChars} 字/条</sub>`);
         report.push("", `<sub>${ms} ms · ${usage.promptTokens} in (${usage.cacheHitTokens} cached) / ${usage.completionTokens} out · $${cost.toFixed(5)}</sub>`, "");
       } catch (err) {
         console.log(`failed: ${(err as Error).message}`);
@@ -121,13 +127,26 @@ async function main() {
       }
     }
   }
+  const summary = summarizeTone(tones.map((t) => t.tone));
+  report.push(`**AI tone:** ${summary} (lower is more human)`, "");
   report.push(`**Total at peak rates:** $${total.toFixed(4)}`);
 
   const dir = join(ROOT, "data/bakeoff");
   mkdirSync(dir, { recursive: true });
   const file = join(dir, `${now.toISOString().replace(/[:.]/g, "-")}-${model.name}.md`);
   writeFileSync(file, report.join("\n"));
-  console.log(`\nTotal $${total.toFixed(4)} at peak rates · report: ${file.replace(ROOT, "")}`);
+  console.log(`\nAI 味：${summary}`);
+  console.log(`Total $${total.toFixed(4)} at peak rates · report: ${file.replace(ROOT, "")}`);
+}
+
+function describeTone(t: ToneReport): string {
+  return [...t.flags, t.longBubbles && `长气泡×${t.longBubbles}`, t.periods && `句号×${t.periods}`].filter(Boolean).join("、");
+}
+
+function summarizeTone(ts: ToneReport[]): string {
+  if (!ts.length) return "no replies";
+  const avg = (f: (t: ToneReport) => number) => (ts.reduce((n, t) => n + f(t), 0) / ts.length).toFixed(1);
+  return `score ${avg((t) => t.score)} per reply · ${avg((t) => t.avgChars)} chars per bubble · ${avg((t) => t.bubbles)} bubbles per reply`;
 }
 
 main().catch((err) => {

@@ -21,7 +21,7 @@ A possible second goal is selling it. That depends on questions below that aren'
 | Architecture | A fixed pipeline, **not an agent** | The model has no tools. Code decides what is stored and sent, which is safer and easier to predict. |
 | Storage | SQLite (`node:sqlite`) in a local `data/` folder | One file with no server and no native dependencies. It's enough for one user. A hosted product would move to Postgres. |
 | Memory | Short facts, each kept only if its evidence is a **verbatim quote** of the user | The model's guesses never become "memories". Facts can be listed, deleted and exported. Memory is off by default. |
-| Persona | Adapted from 狗头军师 (MIT): 接 / 放 / 给 / 抛, emotion first, teasing limits | 小拜 is open about being code and never invents human experiences. |
+| Persona | Adapted from 狗头军师 (MIT): 接 / 放 / 给 / 抛, emotion first, teasing limits | 小拜 chats like a friend and never invents human experiences. It doesn't bring up being an AI, but says so honestly when sincerely asked. |
 | Safety | Crisis keywords add a safety prompt (110 / 120 / 12356) | Keyword matching is a floor, not a full classifier (see Milestone 3). |
 
 ## Where it stands
@@ -60,6 +60,8 @@ Record the results in `docs/design/wechat-transport.md`.
 
 ## Milestone 3: quality
 
+- [x] **Less AI-sounding replies** (2026-09-24): identity rules, 「说人话」, short bubbles, photo reactions, anti-repeat, human timing, and an AI-tone score in the bake-off. See [the design note](design/humanlike-replies.md).
+- [ ] Check photo replies with real test photos, and consider learning style from a consented real chat export.
 - [ ] **Rolling summary:** today the prompt gets the last 40 messages verbatim. Add a short running summary so longer relationships stay coherent without prompt costs growing.
 - [ ] **Forgetting:** `/memory forget` should also remove the fact from recent history sent to the model, not only from the fact table.
 - [ ] **Memory claims:** 小拜 sometimes says 「我都记着」 when memory is off. Tighten the persona and add a bake-off case.

@@ -68,9 +68,29 @@ function situationSection(opts: {
   return lines.join("\n");
 }
 
+/** How many of 小拜's recent turns to list, and how many phrases at most. */
+const RECENT_TURNS = 3;
+const RECENT_PHRASES = 6;
+
+/**
+ * Phrases 小拜 used in its last few turns, so it doesn't repeat itself (the
+ * most obvious template tell after "在吗"-type messages). Idea from zhichi's
+ * AntiRepeat (MIT). Very short bubbles (“在”“咋了”) are normal and not listed.
+ */
+export function recentPhrases(history: StoredMessage[]): string[] {
+  const turns = history.filter((m) => m.role === "assistant").slice(-RECENT_TURNS);
+  const phrases = turns.flatMap((m) => m.bubbles ?? [m.text]).map((b) => b.trim());
+  return [...new Set(phrases.filter((b) => [...b].length >= 5))].slice(-RECENT_PHRASES).map((b) => [...b].slice(0, 40).join(""));
+}
+
+function recentSection(phrases: string[]): string | null {
+  if (!phrases.length) return null;
+  return ["## 最近说过的话", "这些是你最近几轮说过的。这一轮别再用同样的说法、开头或句式：", ...phrases.map((p) => `- ${p}`)].join("\n");
+}
+
 export function buildSystemPrompt(
   parts: PromptParts,
-  opts: { now: Date; timeZone: string; memoryEnabled: boolean; facts: Fact[]; crisis: boolean },
+  opts: { now: Date; timeZone: string; memoryEnabled: boolean; facts: Fact[]; crisis: boolean; recent?: string[] },
 ): string {
   // Stable content first so the provider's prefix cache covers persona + examples.
   return [
@@ -78,6 +98,7 @@ export function buildSystemPrompt(
     examplesSection(parts.examples),
     situationSection(opts),
     opts.crisis ? parts.safety : null,
+    recentSection(opts.recent ?? []), // last: constraints closest to the question are followed best
   ]
     .filter(Boolean)
     .join("\n\n");

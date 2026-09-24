@@ -41,6 +41,7 @@ Then chat with 小拜 from your phone. The terminal shows each message, each bub
 How it behaves:
 - **Who gets replies:** only the bound one-to-one chat. If you open another chat on the Mac, 小拜 waits until it's back. Messages already in the chat when it starts are never answered. If a second person speaks in the chat (a group), it pauses.
 - **Bursts:** several quick messages (within about 1.5 s) become one turn.
+- **Timing:** the first bubble comes 1.5–3.5 s after the message at the earliest, as if reading it; later bubbles take about as long as typing them, with some jitter.
 - **Photos:** read from WeChat's local image folder for that chat (`COMPANION_WECHAT_MEDIA_DIR`). Without it, 小拜 is told it can't see the picture. Stickers, voice, video and files are described to 小拜 as things it can't open.
 - **Sending:** the helper types each bubble into the composer and presses Return, then confirms the bubble appeared. It never sends while someone has a draft in the composer, and never resends a bubble it couldn't confirm.
 
@@ -99,7 +100,7 @@ message ─► SQLite (history) ─► prompt ─► deepseek-flash ─► check
 ```bash
 npm test             # vitest, no network
 npm run typecheck
-npm run bakeoff      # live persona test → data/bakeoff/*.md (about $0.004 per run)
+npm run bakeoff      # live persona test with an AI-tone score → data/bakeoff/*.md (about $0.007 per run)
 npm run bakeoff -- --case cat-photo --runs 3
 ```
 

@@ -41,8 +41,19 @@ export function mergeIncoming<M extends Incoming<unknown>>(batch: M[]): M {
   return { ...batch[batch.length - 1], text: texts.join("\n"), image: images.at(-1)?.image ?? null };
 }
 
-/** Typing-bubble pause: longer bubbles take longer to "type". */
-export const bubbleDelay = (bubble: string) => Math.min(2_500, 500 + 60 * [...bubble].length);
+/**
+ * Pause before a bubble, as if typing it: about 150 ms per character, capped,
+ * with ±25% jitter so the rhythm isn't mechanical. `random` is in [0, 1).
+ */
+export const bubbleDelay = (bubble: string, random = 0.5) =>
+  Math.round(Math.min(4_000, 600 + 150 * [...bubble].length) * (0.75 + random / 2));
+
+/**
+ * The shortest time between a message arriving and the first bubble, as if
+ * reading it first: 1.5–3.5 s. Model time counts towards it, so slow turns
+ * aren't delayed further.
+ */
+export const readDelay = (random = 0.5) => Math.round(1_500 + 2_000 * random);
 
 export class ReplyLoop<M extends Incoming<unknown>> {
   private queue: M[] = [];
@@ -57,8 +68,14 @@ export class ReplyLoop<M extends Incoming<unknown>> {
       onEvent?: (event: ReplyEvent) => void;
       sleep?: (ms: number) => Promise<void>;
       burstWindowMs?: number;
+      random?: () => number;
+      now?: () => number;
     },
   ) {}
+
+  private random() {
+    return (this.deps.random ?? Math.random)();
+  }
 
   private emit(event: ReplyEvent) {
     this.deps.onEvent?.(event);
@@ -99,6 +116,7 @@ export class ReplyLoop<M extends Incoming<unknown>> {
 
   private async answer(message: M, merged: number): Promise<void> {
     const { companion, outlet } = this.deps;
+    const started = (this.deps.now ?? Date.now)();
     this.emit({ type: "inbound", text: message.text, image: message.image !== null, merged });
     const typing = (on: boolean) => outlet.typing?.(message, on).catch(() => {}) ?? Promise.resolve();
     await typing(true);
@@ -126,9 +144,12 @@ export class ReplyLoop<M extends Incoming<unknown>> {
     }
 
     for (const [i, bubble] of bubbles.entries()) {
-      if (i > 0) {
+      if (i === 0) {
+        const wait = readDelay(this.random()) - ((this.deps.now ?? Date.now)() - started);
+        if (wait > 0) await this.sleep(wait);
+      } else {
         await typing(true);
-        await this.sleep(bubbleDelay(bubble));
+        await this.sleep(bubbleDelay(bubble, this.random()));
       }
       const result = await outlet.sendBubble(message, bubble).catch(() => "failed" as const);
       if (result === "failed") {

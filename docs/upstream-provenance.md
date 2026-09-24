@@ -23,6 +23,27 @@ The following files informed the conversational rules in `prompts/persona.zh-CN.
 
 ### Deliberate deviations
 
-The upstream guides often suggest "share a similar experience of your own" (我上次也……). The companion is an openly fictional AI, so the persona replaces this with opinions, observations from the conversation, and remembered history. It never invents human experiences.
+The upstream guides often suggest "share a similar experience of your own" (我上次也……). The companion is an AI (it says so when sincerely asked), so the persona replaces this with opinions, observations from the conversation, and remembered history. It never invents human experiences.
 
 If upstream text is ever vendored into `references/goutoujunshi/`, include the upstream `LICENSE` file alongside it.
+
+## zhichi (咫尺)
+
+- Source: https://github.com/oaa529/zhichi
+- Revision reviewed: 2026-09-14
+- License: MIT, Copyright (c) 2026 oaa
+
+### How it is used
+
+Design reference only. No files are vendored.
+
+- **Closely adapted:** the 「说人话」 section of `prompts/persona.zh-CN.md` follows `buildHumanTonePrompt()` in `packages/core/src/llm/PromptBuilder.ts` (no lists, no 客服腔, no formal linking words, advice in your own voice).
+- **Re-implemented from the idea:**
+  - `recentPhrases()` in `src/companion/prompt.ts` follows `llm/AntiRepeat.ts`: list 小拜's recent phrases at the end of the prompt.
+  - `src/companion/tone.ts` follows the metrics in `work/agnes_ai_tone_probe.mts`.
+  - The jittered typing pauses in `src/channels/reply-loop.ts` follow the idea of `TypingSimulator.ts`.
+
+## ex-skill (前任.skill)
+
+- Source: https://github.com/perkfly/ex-skill (MIT, Copyright (c) 2026 perkfly), revision `c5ece53`
+- Reviewed, not used in code or prompts. Its method (write persona rules as concrete behaviour, use real example lines, measure style from real chat logs) shaped how the examples were rewritten. See [the design note](design/humanlike-replies.md).

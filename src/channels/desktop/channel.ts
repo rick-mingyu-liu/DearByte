@@ -6,7 +6,7 @@ import type { Companion } from "../../companion/companion.ts";
 import { mergeIncoming, ReplyLoop, type Incoming, type ReplyEvent, type SendResult } from "../reply-loop.ts";
 import { HelperError, type WechatUi } from "./helper.ts";
 import type { PhotoFolder } from "./photos.ts";
-import { describeOther, newRows, parseRow } from "./rows.ts";
+import { describeOther, newRows, parseRow, rememberRows } from "./rows.ts";
 
 const POLL_MS = 1_000;
 const ERROR_BACKOFF_MS = 5_000;
@@ -67,6 +67,12 @@ export class DesktopChannel {
     });
   }
 
+  /** Resumes replies. A group-chat pause is lifted too: the operator has checked the chat. */
+  resume(): void {
+    this.paused = false;
+    this.senders.clear();
+  }
+
   get mode(): Mode {
     return this.deps.mode;
   }
@@ -121,7 +127,7 @@ export class DesktopChannel {
     this.status("");
 
     const added = newRows(this.seen, snapshot.rows, (old) => parseRow(old).kind === "meta");
-    this.seen = snapshot.rows;
+    this.seen = rememberRows(this.seen, snapshot.rows);
     if (added === null) {
       this.emit({ type: "status", message: "聊天记录跳动了（滚动或重新加载），重新对齐；这期间的消息可能漏掉" });
       return;
@@ -135,7 +141,7 @@ export class DesktopChannel {
       if (row.kind === "text") messages.push({ text: row.text, image: null });
       else if (row.kind === "photo") messages.push({ text: "", image: { seenAt: now, count: 1 } });
       else if (row.kind === "other") messages.push({ text: describeOther(row.label), image: null });
-      else if (row.kind === "unknown" && !this.reportedUnknown.has(title)) {
+      else if (row.kind === "unknown" && !this.reportedUnknown.has(title) && this.reportedUnknown.size < 20) {
         this.reportedUnknown.add(title);
         this.emit({ type: "status", message: `有一行看不懂，没有回复：${title.slice(0, 40)}（微信要用英文界面）` });
       }

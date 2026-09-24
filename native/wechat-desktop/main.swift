@@ -47,11 +47,16 @@ struct Chat {
         guard let children = attr(table, kAXChildrenAttribute) as? [AXUIElement] else {
             throw HelperError(message: "read_failed")
         }
-        return children
+        return try children
             .filter { str($0, kAXRoleAttribute) == "AXRow" }
-            .map { kids($0).flatMap { kids($0) }.compactMap { str($0, kAXTitleAttribute) }.joined() }
+            .map { row in
+                guard let cells = attr(row, kAXChildrenAttribute) as? [AXUIElement] else { throw HelperError(message: "read_failed") }
+                return cells.flatMap { kids($0) }.compactMap { str($0, kAXTitleAttribute) }.joined()
+            }
     }
 }
+
+var lastWindowCount = 1
 
 func openChat() throws -> Chat {
     guard AXIsProcessTrusted() else { throw HelperError(message: "no_accessibility_permission") }
@@ -68,8 +73,11 @@ func openChat() throws -> Chat {
     // Return goes to WeChat's key window. A second (detached chat) window could
     // take it, so refuse while one is open. The list is empty when WeChat is on
     // another Space; the checks after Return still catch a misdirected key.
+    // The list is empty when WeChat is on another Space, so remember the last
+    // count we could read.
     let windows = (attr(root, kAXWindowsAttribute) as? [AXUIElement]) ?? []
-    return Chat(app: app, table: table, composer: composer, windowCount: windows.count)
+    if !windows.isEmpty { lastWindowCount = windows.count }
+    return Chat(app: app, table: table, composer: composer, windowCount: windows.isEmpty ? lastWindowCount : windows.count)
 }
 
 func pressReturn(_ app: NSRunningApplication) {
@@ -98,36 +106,51 @@ func send(chat boundName: String, text: String) throws -> [String: Any] {
     // Recheck just before sending: the chat, draft or focus could have changed meanwhile.
     guard chat.draft == text, chat.name == boundName, bool(chat.composer, kAXFocusedAttribute) != false else {
         let code = bool(chat.composer, kAXFocusedAttribute) == false ? "not_focused" : "changed_before_send"
-        clear(chat, text)
+        clear(chat, text, boundName)
         throw HelperError(message: code)
     }
     pressReturn(chat.app)
 
     // Sent means: Return took our text out of the composer, and a new "MeSaid"
-    // row with it is at the bottom. The table can drop rows from the top, so
-    // compare occurrences near the bottom rather than the row count.
+    // row with it appeared. The table can drop rows from the top, so look at
+    // the rows appended after the old ones, not at the row count.
     let beforeCount = before.suffix(tail).filter { $0 == expected }.count
     for _ in 0..<24 {
         usleep(250_000)
-        guard let rows = try? chat.rows() else { continue }
-        if chat.draft.isEmpty, rows.suffix(tail).filter({ $0 == expected }).count > beforeCount {
+        guard let rows = try? chat.rows(), chat.draft.isEmpty else { continue }
+        if appended(before, rows).contains(expected) || rows.suffix(tail).filter({ $0 == expected }).count > beforeCount {
             return ["ok": true]
         }
     }
     // Return may or may not have gone through; never retry blindly.
-    if chat.draft == text {
-        clear(chat, text)
+    if chat.draft.hasPrefix(text) {
+        clear(chat, text, boundName)
         throw HelperError(message: "not_sent")
     }
     throw HelperError(message: "unconfirmed")
 }
 
-/// Takes our text back out of the composer, keeping anything a person typed around it.
-func clear(_ chat: Chat, _ text: String) {
+/// Takes our text back out of the composer. The composer was empty when we
+/// filled it, so our text is at the start; anything a person typed after it is
+/// kept. Nothing is touched if another chat is open now.
+func clear(_ chat: Chat, _ text: String, _ boundName: String) {
     let draft = chat.draft
-    guard draft.contains(text) else { return }
-    let rest = draft.replacingOccurrences(of: text, with: "")
+    guard chat.name == boundName, draft.hasPrefix(text) else { return }
+    let rest = String(draft.dropFirst(text.count))
     AXUIElementSetAttributeValue(chat.composer, kAXValueAttribute as CFString, rest as CFString)
+}
+
+/// Rows added after `before`, allowing rows dropped from the top.
+func appended(_ before: [String], _ rows: [String]) -> [String] {
+    if before.isEmpty { return rows }
+    // Keep at least one old row as an anchor, or anything would "line up".
+    for dropped in 0..<before.count {
+        let kept = before[dropped...]
+        if rows.count >= kept.count, Array(rows.prefix(kept.count)) == Array(kept) {
+            return Array(rows.dropFirst(kept.count))
+        }
+    }
+    return []
 }
 
 func reply(_ object: [String: Any]) {
