@@ -132,6 +132,7 @@ Use [Issues](https://github.com/rick-mingyu-liu/DearByte/issues) to report probl
 | [How it works](docs/how-it-works.md) | Reply generation, memory and storage |
 | [Project plan](docs/plan.md) | Decisions, progress and milestones |
 | [Improvements](docs/improvements.md) | Areas for future work |
+| [Contributing](CONTRIBUTING.md) | Read before opening a PR; report security issues via [SECURITY.md](SECURITY.md) |
 
 ## Acknowledgments
 
