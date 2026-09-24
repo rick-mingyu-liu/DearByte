@@ -1,4 +1,4 @@
-import { mkdtempSync, utimesSync, writeFileSync } from "node:fs";
+import { linkSync, mkdtempSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "vitest";
@@ -95,14 +95,23 @@ test("claims each new full-size photo once and ignores thumbnails and old files"
   await expect(empty.claim(0)).rejects.toThrow("还没把这张图存到本地");
 });
 
-test("photos saved long before the row appeared are not matched", async () => {
+test("a photo sent again (a hard link to the old file) is still found", async () => {
   const dir = mkdtempSync(join(tmpdir(), "dearbyte-photos-"));
-  const file = join(dir, "9_.pic.jpg");
-  writeFileSync(file, JPEG);
-  utimesSync(file, new Date("2026-01-01"), new Date("2026-01-01"));
+  const old = join(dir, "1_.pic.jpg");
+  writeFileSync(old, JPEG);
+  utimesSync(old, new Date("2026-01-01"), new Date("2026-01-01"));
+  const folder = new PhotoFolder(dir, { sleep: async () => {} });
+  folder.markExistingSeen();
+  linkSync(old, join(dir, "2_.pic.jpg"));
+  expect(await folder.claim(Date.now())).toEqual(JPEG);
+});
+
+test("falls back to the thumbnail when the full-size photo never arrives", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "dearbyte-photos-"));
   let t = Date.now();
   const folder = new PhotoFolder(dir, { sleep: async () => void (t += 20_000), now: () => t });
-  await expect(folder.claim(Date.now())).rejects.toThrow();
+  writeFileSync(join(dir, "3_.pic_thumb.jpg"), JPEG);
+  expect(await folder.claim(Date.now())).toEqual(JPEG);
 });
 
 // --- Channel ---------------------------------------------------------------

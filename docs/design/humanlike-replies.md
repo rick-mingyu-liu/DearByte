@@ -26,12 +26,16 @@
 6. **Anti-repeat:** the phrases 小拜 used in its last 3 turns go at the end of the prompt with "don't reuse these".
 7. **Timing:** at least 1.5–3.5 s between message and first bubble (model time counts toward it), then ~150 ms per character between bubbles, with ±25% jitter.
 
+8. **After live feedback (same day):** replies were still too long, and 「你爱我吗」 got a hedge (「爱这个字太重了，我可不敢乱认」). Now most replies are 1 bubble, at most 2 for small talk, and love/like questions get a clear, confident yes (「爱啊」「这还用问」), light and never clingy.
+9. **Re-sent photos:** WeChat hard-links a photo sent twice to the old file, which keeps the old mtime. Photos now match by the later of mtime and ctime, with the thumbnail as a fallback.
+
 ## Measured (bake-off, 14 text cases × 2 runs, deepseek-flash)
 
 | | AI-tone score per reply | Characters per bubble | Bubbles per reply |
 |---|---|---|---|
 | Before | 1.4 | 24.0 | 2.9 |
 | After | 0.4 | 11.5 | 2.8 |
+| After live feedback (fewer bubbles, clear yes to love/like) | 0.2–0.4 | 11.3 | 2.2 |
 
 The remaining hits are the identity and crisis cases, where saying "我是 AI" is required. The two photo cases were skipped: they need real photos in `data/test-images/`.
 

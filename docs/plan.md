@@ -75,7 +75,7 @@ This milestone has a gate: don't build until both questions are answered.
 1. **A sellable transport:** desktop automation can't be sold. The candidates are iLink (微信 ClawBot; community write-ups describe it as for personal use and 「不适用于商业客服」, so read the full 《微信 ClawBot 功能使用条款》), 企业微信, or a 公众号 / 服务号. Each has its own terms and look on the phone. If none allows it, the product has to live outside WeChat.
 2. **China regulation:** 《人工智能拟人化互动服务管理暂行办法》 has applied since 2026-07-15. A public service needs:
    - disclosure that it is an AI, with a reminder after every 2 hours of continuous use
-   - no design that encourages dependence
+   - no design that encourages dependence (小拜 now answers "do you love me?" with a clear yes, by choice for the demo; a public product must revisit this)
    - protection for minors: age checks, no virtual romance, parental consent under 14
    - a way for users to copy and delete their history, and to leave immediately
    - a security assessment and 算法备案 before launch
