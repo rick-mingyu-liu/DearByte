@@ -5,7 +5,7 @@ import { expect, test } from "vitest";
 import { DesktopChannel, type DesktopEvent, type Mode } from "../src/channels/desktop/channel.ts";
 import { HelperError, type WechatUi } from "../src/channels/desktop/helper.ts";
 import { PhotoFolder } from "../src/channels/desktop/photos.ts";
-import { describeOther, newRows, parseRow } from "../src/channels/desktop/rows.ts";
+import { bubbleKey, bubbleLabel, describeOther, newRows, parseRow } from "../src/channels/desktop/rows.ts";
 import { mergeIncoming } from "../src/channels/reply-loop.ts";
 import { Companion } from "../src/companion/companion.ts";
 import { FALLBACK_REPLY } from "../src/companion/output.ts";
@@ -416,4 +416,76 @@ test("a draft-mode channel never reports a pause as a problem", () => {
   channel.poll({ chat: CHAT, rows: [said("早")] });
   channel.paused = true;
   expect(channel.health).toBeNull();
+});
+
+// --- WeChat 4.x: rows don't say who sent them --------------------------------
+
+const bubble = (t: string) => `Bubble:${t}`;
+
+test("4.x: parses bubbles, and recognises emoji codes and placeholders", () => {
+  expect(parseRow(bubble("在吗"))).toEqual({ kind: "bubble", text: "在吗" });
+  expect(bubbleKey("行吧 [白眼]")).toBe(bubbleKey("行吧"));
+  expect(bubbleLabel("[Photo]")).toBe("Photo");
+  expect(bubbleLabel("Image")).toBe("Image"); // how 4.1.13 shows a received photo
+  expect(describeOther(bubbleLabel("Image")!)).toContain("看不到图");
+  expect(bubbleLabel("[哈哈] 好")).toBeNull();
+  expect(describeOther("Photo")).toContain("看不到图");
+});
+
+test("4.x: answers the user's bubbles and recognises its own, even with emoji codes", async () => {
+  const { channel, sent, model } = setup({ responses: [reply("好啊 [白眼]"), reply("嗯")] });
+  const history = ["", "", bubble("旧消息"), "13:20", bubble("旧回复")];
+  channel.poll({ chat: CHAT, rows: history });
+  channel.poll({ chat: CHAT, rows: [...history, bubble("出去玩吗")] });
+  await channel.settle();
+  expect(sent).toEqual(["好啊 [白眼]"]);
+  // WeChat drew the emoji as a picture, so the row has no code; still hers, not a new message.
+  channel.poll({ chat: CHAT, rows: [...history, bubble("出去玩吗"), bubble("好啊")] });
+  await channel.settle();
+  expect(model.calls).toHaveLength(1);
+  // Her row read a second time (a bad alignment) is still hers: no reply to herself.
+  channel.poll({ chat: CHAT, rows: [...history, bubble("出去玩吗"), bubble("好啊"), bubble("好啊")] });
+  await channel.settle();
+  expect(model.calls).toHaveLength(1);
+});
+
+test("a runaway loop of turns pauses instead of replying on", async () => {
+  const { channel, model, events } = setup({ responses: Array.from({ length: 10 }, (_, i) => reply(`回${i}`)) });
+  const rows: string[] = [];
+  channel.poll({ chat: CHAT, rows });
+  for (let i = 0; i < 8; i++) {
+    rows.push(bubble(`问${i}`));
+    channel.poll({ chat: CHAT, rows: [...rows] });
+    await channel.settle();
+  }
+  expect(model.calls).toHaveLength(6);
+  expect(channel.paused).toBe(true);
+  expect(events.some((e) => e.type === "status" && e.message.includes("已暂停"))).toBe(true);
+});
+
+test("4.x: rows scrolled back into view aren't new, but a row loading at the bottom is", async () => {
+  const { channel, model } = setup({ responses: [reply("看到了")] });
+  const rows = ["", "", "", "", "", bubble("a"), bubble("b"), bubble("c"), bubble("d")];
+  channel.poll({ chat: CHAT, rows });
+  // The user scrolls up: old rows render, the bottom ones stay.
+  channel.poll({ chat: CHAT, rows: [bubble("x"), bubble("y"), ...rows.slice(2)] });
+  await channel.settle();
+  expect(model.calls).toHaveLength(0);
+  // A new message that first appears blank, then fills in.
+  const next = [bubble("x"), bubble("y"), ...rows.slice(2)];
+  channel.poll({ chat: CHAT, rows: [...next, ""] });
+  channel.poll({ chat: CHAT, rows: [...next, bubble("新消息")] });
+  await channel.settle();
+  expect(model.calls).toHaveLength(1);
+  expect(model.calls[0].messages.at(-1)?.content).toBe("新消息");
+});
+
+test("4.x: a bubble that failed before sending isn't expected, so the user can say the same words", async () => {
+  const { channel, model } = setup({ responses: [reply("在"), reply("嗯")], sendErrors: ["fill_failed"] });
+  channel.poll({ chat: CHAT, rows: [bubble("hi")] });
+  channel.poll({ chat: CHAT, rows: [bubble("hi"), bubble("在吗")] });
+  await channel.settle();
+  channel.poll({ chat: CHAT, rows: [bubble("hi"), bubble("在吗"), bubble("在")] });
+  await channel.settle();
+  expect(model.calls).toHaveLength(2);
 });

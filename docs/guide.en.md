@@ -23,7 +23,7 @@ echo 'DEEPSEEK_API_KEY=sk-...' > .env   # gitignored
 ## Chat in WeChat (the real 小拜 account)
 
 You need:
-- **WeChat for Mac 3.8.4 with the English UI, logged in as 小拜.** Don't update it: WeChat 4.x encrypts received images.
+- **WeChat for Mac 4.x (tested on 4.1.13) or 3.8.4, with the English UI, logged in as 小拜.** On 4.x received images are encrypted, so 小拜 says she can't see photos; 3.8.4 can see them. Run one copy of the runner at a time: a second one refuses to start, because two would answer each other.
 - **Accessibility permission** for your terminal app (System Settings → Privacy & Security → Accessibility).
 - **Swift** (Xcode Command Line Tools). The helper in `native/wechat-desktop/` is built automatically on first run.
 - **The chat with you open** in WeChat's main window, scrolled to the bottom. The window can sit on another desktop (Space), but don't close it, and don't open chats in separate windows.

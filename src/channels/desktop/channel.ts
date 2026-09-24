@@ -7,7 +7,7 @@ import type { Initiative } from "../../companion/companion.ts";
 import { mergeIncoming, ReplyLoop, type Incoming, type InitiateResult, type ReplyEvent, type SendResult } from "../reply-loop.ts";
 import { HelperError, type WechatUi } from "./helper.ts";
 import type { PhotoFolder } from "./photos.ts";
-import { describeOther, newRows, parseRow, rememberRows } from "./rows.ts";
+import { bubbleKey, bubbleLabel, describeOther, newRows, parseRow, rememberRows } from "./rows.ts";
 
 const POLL_MS = 1_000;
 const ERROR_BACKOFF_MS = 5_000;
@@ -16,6 +16,17 @@ const EMPTY_READS_PROBLEM = 30;
 /** A draft in the composer (someone typing on the Mac) gets this long to clear. */
 const BUSY_RETRIES = 3;
 const BUSY_WAIT_MS = 3_000;
+/** WeChat 4.x: how long a sent bubble waits to be recognised as 小拜's own row. */
+const OUTGOING_TTL_MS = 5 * 60_000;
+/** WeChat 4.x: a blank row filling in counts as new only this close to the newest row; higher up, it's the user scrolling. */
+const LOADING_ROWS = 3;
+/** WeChat 4.x: a bubble matching anything 小拜 said this recently is taken as hers, never answered. */
+const ECHO_MS = 10 * 60_000;
+/** More turns than this within RUNAWAY_MS means something is looping: pause instead. */
+const RUNAWAY_TURNS = 6;
+const RUNAWAY_MS = 60_000;
+/** Send errors after which the bubble may still have reached WeChat. */
+const MAYBE_SENT = new Set(["unconfirmed", "helper_timeout", "helper_exited"]);
 
 /** `count` photos arrived in this burst; 小拜 sees the newest. */
 export type PhotoRef = { seenAt: number; count: number };
@@ -42,6 +53,12 @@ export class DesktopChannel {
   problem: string | null = null;
   /** Snapshots in a row with no rows although the chat had some. */
   private emptyReads = 0;
+  /** WeChat 4.x: bubbles 小拜 sent that haven't shown up as rows yet. */
+  private outgoing: Array<{ key: string; at: number }> = [];
+  /** WeChat 4.x: everything 小拜 sent lately, kept after it's matched, so a row read twice is still hers. */
+  private sentLately: Array<{ key: string; at: number }> = [];
+  /** When recent turns started, for the runaway check. */
+  private turnTimes: number[] = [];
   paused = false;
   /** Set on shutdown: finish the turn in memory, but type nothing more into WeChat. */
   stopping = false;
@@ -81,6 +98,7 @@ export class DesktopChannel {
   resume(): void {
     this.paused = false;
     this.senders.clear();
+    this.turnTimes = [];
   }
 
   /** Why 小拜 isn't answering right now, or null. For alerts: a pause counts, as it's easy to forget. */
@@ -170,7 +188,7 @@ export class DesktopChannel {
     this.setProblem(null);
     this.status("");
 
-    const added = newRows(this.seen, snapshot.rows, (old) => parseRow(old).kind === "meta");
+    const added = newRows(this.seen, snapshot.rows, (old, fromEnd) => old === "" ? fromEnd < LOADING_ROWS : parseRow(old).kind === "meta");
     this.seen = rememberRows(this.seen, snapshot.rows);
     if (added === null) {
       this.emit({ type: "status", message: "聊天记录跳动了（滚动或重新加载），重新对齐；这期间的消息可能漏掉" });
@@ -178,9 +196,22 @@ export class DesktopChannel {
     }
 
     const now = this.deps.now?.() ?? Date.now();
+    this.outgoing = this.outgoing.filter((o) => now - o.at < OUTGOING_TTL_MS);
+    this.sentLately = this.sentLately.filter((o) => now - o.at < ECHO_MS);
     const messages: DesktopMessage[] = [];
     for (const title of added) {
       const row = parseRow(title);
+      if (row.kind === "bubble") {
+        const mine = this.outgoing.findIndex((o) => o.key === bubbleKey(row.text));
+        if (mine >= 0) this.outgoing.splice(mine, 1);
+        else if (this.sentLately.some((o) => o.key === bubbleKey(row.text))) {
+          this.emit({ type: "status", message: `读到一条和小拜刚说过的一样的话，当作她自己的，没有回复：${row.text.slice(0, 30)}` });
+        } else {
+          const label = bubbleLabel(row.text);
+          messages.push({ text: label ? describeOther(label) : row.text, image: null });
+        }
+        continue;
+      }
       if (row.kind === "text" || row.kind === "photo" || row.kind === "other") this.senders.add(row.sender);
       if (row.kind === "text") messages.push({ text: row.text, image: null });
       else if (row.kind === "photo") messages.push({ text: "", image: { seenAt: now, count: 1 } });
@@ -208,6 +239,13 @@ export class DesktopChannel {
       if (photos) this.deps.photos?.claim(now, photos).catch(() => {});
       return;
     }
+    this.turnTimes = [...this.turnTimes.filter((t) => now - t < RUNAWAY_MS), now];
+    if (this.turnTimes.length > RUNAWAY_TURNS) {
+      this.paused = true;
+      this.emit({ type: "status", message: `一分钟里回了 ${RUNAWAY_TURNS} 次以上，像是在自己跟自己聊。已暂停（看一眼微信，没问题再 /resume）` });
+      this.emit({ type: "skipped", count: messages.length });
+      return;
+    }
     this.loop.push(messages);
   }
 
@@ -222,6 +260,10 @@ export class DesktopChannel {
     // WeChat trims bubbles, and the helper confirms by exact text.
     const bubble = raw.trim();
     if (!bubble) return "sent";
+    // Expected before it's sent: the row can show up in a poll while the send is still confirming.
+    const pending = { key: bubbleKey(bubble), at: this.deps.now?.() ?? Date.now() };
+    this.outgoing.push(pending);
+    this.sentLately.push(pending);
     for (let attempt = 1; ; attempt++) {
       try {
         await this.deps.ui.send(this.openName ?? this.deps.names[0], bubble);
@@ -232,6 +274,11 @@ export class DesktopChannel {
         if ((code === "composer_not_empty" || code === "wrong_chat") && attempt < BUSY_RETRIES) {
           await this.sleep(BUSY_WAIT_MS);
           continue;
+        }
+        // Keep expecting the row only if the bubble may have gone out.
+        if (!MAYBE_SENT.has(code)) {
+          this.outgoing = this.outgoing.filter((o) => o !== pending);
+          this.sentLately = this.sentLately.filter((o) => o !== pending);
         }
         this.emit({ type: "send_failed", message: (err as Error).message });
         return "failed";

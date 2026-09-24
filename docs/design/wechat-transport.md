@@ -45,10 +45,21 @@ Row titles:
   - A photo with a caption merged into one turn and was described correctly: 3.6 s, about $0.0008, 4 bubbles.
   - The first run missed messages because rows were matched on the chat title; that is fixed and covered by tests.
 
+## WeChat 4.x (observed on 4.1.13, 2026-09-24)
+
+WeChat for Mac updated itself to 4.1.13 and 小拜 stopped reading the chat: the helper looked for 3.8.4's "Messages" table.
+
+- **Controls have identifiers now.** The message list is `chat_message_list` (an `AXList`) and the composer is `chat_input_field` (its title is the chat name). The helper finds these first and falls back to 3.8.4's layout.
+- **Rows carry only the text.** Message rows are `AXStaticText` with identifier `chat_bubble_item_view` and the bubble's text as title, with no sender. Time labels have no identifier. Rows scrolled out of view stay in the list as empty `virtual_cell`s, and new rows are appended at the bottom, so positions stay stable. The helper passes messages as `Bubble:<text>`, time labels as they are, and off-screen rows as "".
+- **Who sent it.** The channel remembers what 小拜 sent in the last 10 minutes; a bubble matching one of those (ignoring spaces and emoji codes like `[白眼]`) is hers. The rest are the user's.
+- **A received photo reads `Image`.** 4.x stores images encrypted, and we don't decrypt WeChat's files, so 小拜 is told she can't see it. Before this was handled, the row reached the model as the text "Image" and it made up a picture.
+- **Two runners answer each other.** On the first 4.x test two runners were live; each took the other's bubbles for the user's and they replied to each other every few seconds. The runner now holds `data/runner.lock`, and it pauses itself after more than 6 turns in a minute.
+- **Lost on 4.x:** photos, telling a group chat apart, and messages typed as 小拜 on the phone (they'd be read as the user's). A user message identical to something 小拜 said in the last 10 minutes is ignored.
+
 ## Limits and risks
 
 - **Account risk:** Tencent doesn't authorise automation. Use only the test account. Keep the volume human: one chat, replies only.
-- **Version lock:** stay on WeChat for Mac 3.8.4 with the English UI. The row format was only observed in English, and 4.x encrypts image files.
+- **Version:** 4.x (tested on 4.1.13) and 3.8.4, English UI. Rows were only observed in English, and 4.x encrypts image files.
 - **The Mac must stay awake** with the chat open, scrolled to the bottom. Scrolling up or switching chats pauses replies until it's back.
 - **One-to-one only:** any sender who isn't "Me" is treated as the user. Group chats would need the sender kept.
 - **Not a product:** this route can't be sold. Selling would need a different transport (see the plan).

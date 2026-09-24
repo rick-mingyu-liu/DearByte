@@ -7,6 +7,11 @@
 // The sender is the contact's own nickname ("Alex"), not the chat title, which
 // can be a remark ("张三"). The bound chat is one-to-one, so anyone who isn't
 // "Me" is the user; a group chat would need the sender kept.
+//
+// WeChat 4.x (observed on 4.1.13) no longer says who sent a row. The helper
+// passes message rows as "Bubble:<text>", time labels as they are, and rows
+// scrolled out of view as "". The channel tells 小拜's own bubbles apart by
+// matching them with what it just sent.
 
 export type Row =
   | { kind: "text"; sender: string; text: string }
@@ -14,6 +19,8 @@ export type Row =
   /** Something else from the user: sticker, voice, file, … (label as WeChat shows it). */
   | { kind: "other"; sender: string; label: string }
   | { kind: "mine" }
+  /** WeChat 4.x: a message from either side; the channel works out which. */
+  | { kind: "bubble"; text: string }
   /** Time labels and blank rows. */
   | { kind: "meta" }
   /** Anything we don't recognise, e.g. WeChat switched to the Chinese UI. */
@@ -22,6 +29,7 @@ export type Row =
 const TIME_LABEL = /^(\d{1,2}:\d{2}|(Yesterday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday) \d{1,2}:\d{2}|\d{4}\/\d{1,2}\/\d{1,2} \d{1,2}:\d{2})$/;
 
 export function parseRow(title: string): Row {
+  if (title.startsWith("Bubble:")) return { kind: "bubble", text: title.slice("Bubble:".length) };
   if (title.startsWith("MeSaid:") || title.startsWith("Me:")) return { kind: "mine" };
   const said = /^(.+?)Said:([\s\S]*)$/.exec(title);
   if (said) return { kind: "text", sender: said[1], text: said[2] };
@@ -68,11 +76,18 @@ export function alignRows(previous: string[], next: string[]): number | null {
  * line up. A changed row counts as new only if `wasPending(oldTitle)` says its
  * old value was a placeholder, so a message already there is never answered twice.
  */
-export function newRows(previous: string[], next: string[], wasPending: (title: string) => boolean = () => true): string[] | null {
+export function newRows(
+  previous: string[],
+  next: string[],
+  /** `fromEnd` is the row's distance from the newest row (0 = last). */
+  wasPending: (title: string, fromEnd: number) => boolean = () => true,
+): string[] | null {
   const dropped = alignRows(previous, next);
   if (dropped === null) return null;
   const overlap = Math.min(previous.length - dropped, next.length);
-  const changed = next.slice(0, overlap).filter((row, i) => row !== previous[dropped + i] && wasPending(previous[dropped + i]));
+  const changed = next
+    .slice(0, overlap)
+    .filter((row, i) => row !== previous[dropped + i] && wasPending(previous[dropped + i], next.length - 1 - i));
   return [...changed, ...next.slice(overlap)];
 }
 
@@ -87,9 +102,26 @@ export function rememberRows(previous: string[], next: string[]): string[] {
   return next.map((row, i) => (row === "" && previous[dropped + i] !== undefined ? previous[dropped + i] : row));
 }
 
+/**
+ * Bubble text reduced to what survives WeChat's display: no spaces, and no
+ * emoji codes like [白眼], which 4.x may draw as pictures. Used to recognise
+ * 小拜's own bubbles.
+ */
+export function bubbleKey(text: string): string {
+  return text.replace(/\[[^\[\]\s]{1,12}\]/g, "").replace(/\s+/g, "");
+}
+
+/** A 4.x bubble that's really a placeholder for something that isn't text. */
+export function bubbleLabel(text: string): string | null {
+  // A received photo reads "Image" (observed on 4.1.13); the others are guesses in the same style.
+  const m = /^\[?(Photo|Image|Picture|图片|照片|Sticker|Animated Sticker|动画表情|表情|Voice|语音|Video|视频|File|文件)\]?$/i.exec(text.trim());
+  return m ? m[1] : null;
+}
+
 /** How an unfamiliar item is described to 小拜 so it answers honestly. */
 export function describeOther(label: string): string {
   if (/voice|语音/i.test(label)) return "（用户发了一条语音，你听不到内容）";
+  if (/photo|image|picture|图片|照片/i.test(label)) return "（用户发了一张图，你现在看不到图）";
   if (/sticker|表情/i.test(label)) return "（用户发了一个表情包，你看不清是什么）";
   if (/video|视频/i.test(label)) return "（用户发了一个视频，你看不了视频）";
   if (/file|文件/i.test(label)) return "（用户发了一个文件，你打不开文件）";
