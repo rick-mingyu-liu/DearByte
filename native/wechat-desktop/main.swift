@@ -2,6 +2,7 @@
 //
 // It only touches WeChat's main window through macOS Accessibility:
 //   {"cmd":"snapshot"}                    → the open chat's name and message rows
+//   {"cmd":"check"}                       → whether Return would reach the composer (read-only)
 //   {"cmd":"send","chat":"…","text":"…"}  → type into the composer, press Return, confirm
 // Sending refuses unless the open chat is the bound one and the composer is
 // empty, so it never types into another chat or over someone's draft.
@@ -33,9 +34,29 @@ struct HelperError: Error { let message: String }
 
 struct Chat {
     let app: NSRunningApplication
+    let root: AXUIElement
+    let window: AXUIElement
     let table: AXUIElement
     let composer: AXUIElement
-    let windowCount: Int
+    /// Return goes to WeChat's key window and its focused element, so both must
+    /// be this chat's composer. WeChat reports the focused window and element
+    /// even from another Space; the window list is empty there, so it's only a
+    /// fallback. When neither can be read, refuse rather than guess.
+    func returnTarget() -> String? {
+        if let w = attr(root, kAXFocusedWindowAttribute), CFGetTypeID(w) == AXUIElementGetTypeID() {
+            guard CFEqual(w, window) else { return "other_window_open" }
+        } else {
+            let windows = (attr(root, kAXWindowsAttribute) as? [AXUIElement]) ?? []
+            guard windows.count == 1 else { return windows.isEmpty ? "window_unknown" : "other_window_open" }
+        }
+        if let f = attr(root, kAXFocusedUIElementAttribute), CFGetTypeID(f) == AXUIElementGetTypeID() {
+            guard CFEqual(f, composer) else { return "not_focused" }
+        } else if bool(composer, kAXFocusedAttribute) != true {
+            return "not_focused"
+        }
+        return nil
+    }
+
     /// The composer's title is the open chat's name.
     var name: String { str(composer, kAXTitleAttribute) ?? "" }
     var draft: String { str(composer, kAXValueAttribute) ?? "" }
@@ -56,8 +77,6 @@ struct Chat {
     }
 }
 
-var lastWindowCount = 1
-
 func openChat() throws -> Chat {
     guard AXIsProcessTrusted() else { throw HelperError(message: "no_accessibility_permission") }
     let apps = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId)
@@ -70,14 +89,7 @@ func openChat() throws -> Chat {
     let window = w as! AXUIElement
     guard let table = find(window, role: "AXTable", description: "Messages"),
           let composer = find(window, role: "AXTextArea") else { throw HelperError(message: "no_open_chat") }
-    // Return goes to WeChat's key window. A second (detached chat) window could
-    // take it, so refuse while one is open. The list is empty when WeChat is on
-    // another Space; the checks after Return still catch a misdirected key.
-    // The list is empty when WeChat is on another Space, so remember the last
-    // count we could read.
-    let windows = (attr(root, kAXWindowsAttribute) as? [AXUIElement]) ?? []
-    if !windows.isEmpty { lastWindowCount = windows.count }
-    return Chat(app: app, table: table, composer: composer, windowCount: windows.isEmpty ? lastWindowCount : windows.count)
+    return Chat(app: app, root: root, window: window, table: table, composer: composer)
 }
 
 func pressReturn(_ app: NSRunningApplication) {
@@ -92,7 +104,7 @@ func send(chat boundName: String, text: String) throws -> [String: Any] {
     let chat = try openChat()
     guard chat.name == boundName else { throw HelperError(message: "wrong_chat") }
     guard chat.draft.isEmpty else { throw HelperError(message: "composer_not_empty") }
-    guard chat.windowCount <= 1 else { throw HelperError(message: "other_window_open") }
+    if let problem = chat.returnTarget(), problem != "not_focused" { throw HelperError(message: problem) }
     let before = try chat.rows()
     let expected = "MeSaid:\(text)"
     let tail = 3
@@ -104,10 +116,10 @@ func send(chat boundName: String, text: String) throws -> [String: Any] {
     AXUIElementSetAttributeValue(chat.composer, kAXFocusedAttribute as CFString, kCFBooleanTrue)
     usleep(150_000)
     // Recheck just before sending: the chat, draft or focus could have changed meanwhile.
-    guard chat.draft == text, chat.name == boundName, bool(chat.composer, kAXFocusedAttribute) != false else {
-        let code = bool(chat.composer, kAXFocusedAttribute) == false ? "not_focused" : "changed_before_send"
+    let target = chat.returnTarget()
+    guard chat.draft == text, chat.name == boundName, target == nil else {
         clear(chat, text, boundName)
-        throw HelperError(message: code)
+        throw HelperError(message: target ?? "changed_before_send")
     }
     pressReturn(chat.app)
 
@@ -144,9 +156,10 @@ func clear(_ chat: Chat, _ text: String, _ boundName: String) {
 func appended(_ before: [String], _ rows: [String]) -> [String] {
     if before.isEmpty { return rows }
     // Keep at least one old row as an anchor, or anything would "line up".
-    for dropped in 0..<before.count {
+    // Rows rarely drop by more than a few per send; 50 matches the Node side.
+    for dropped in 0..<min(before.count, 51) {
         let kept = before[dropped...]
-        if rows.count >= kept.count, Array(rows.prefix(kept.count)) == Array(kept) {
+        if rows.count >= kept.count, rows.prefix(kept.count).elementsEqual(kept) {
             return Array(rows.dropFirst(kept.count))
         }
     }
@@ -172,6 +185,10 @@ while let line = readLine() {
         case "snapshot":
             let chat = try openChat()
             reply(["id": id, "ok": true, "chat": chat.name, "rows": try chat.rows(), "draft": !chat.draft.isEmpty])
+        case "check":
+            // Read-only: would a send go to this chat's composer right now?
+            let chat = try openChat()
+            reply(["id": id, "ok": true, "chat": chat.name, "problem": chat.returnTarget() ?? NSNull()])
         case "send":
             guard let boundName = request["chat"] as? String, let text = request["text"] as? String, !text.isEmpty else {
                 throw HelperError(message: "bad_request")

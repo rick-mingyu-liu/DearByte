@@ -141,9 +141,15 @@ export class DesktopChannel {
       if (row.kind === "text") messages.push({ text: row.text, image: null });
       else if (row.kind === "photo") messages.push({ text: "", image: { seenAt: now, count: 1 } });
       else if (row.kind === "other") messages.push({ text: describeOther(row.label), image: null });
-      else if (row.kind === "unknown" && !this.reportedUnknown.has(title) && this.reportedUnknown.size < 20) {
+      else if (row.kind === "unknown" && !this.reportedUnknown.has(title) && this.reportedUnknown.size <= 20) {
         this.reportedUnknown.add(title);
-        this.emit({ type: "status", message: `有一行看不懂，没有回复：${title.slice(0, 40)}（微信要用英文界面）` });
+        this.emit({
+          type: "status",
+          message:
+            this.reportedUnknown.size > 20
+              ? "看不懂的行太多了，之后不再逐条提示（微信是不是切成了中文界面？）"
+              : `有一行看不懂，没有回复：${title.slice(0, 40)}（微信要用英文界面）`,
+        });
       }
     }
     if (!messages.length) return;
