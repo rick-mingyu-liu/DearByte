@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ChatMessage, ContentPart, Fact, ImageInput, StoredMessage } from "../domain.ts";
+import { bubbleHint, type Energy } from "./energy.ts";
 import { daysBetween, describeNow, localDate } from "./time.ts";
 
 export type Example = { context?: string; image?: string; user: string; bubbles: string[] };
@@ -103,9 +104,24 @@ function recentSection(phrases: string[]): string | null {
   return ["## 最近说过的话", "这些是你最近几轮说过的。这一轮别再用同样的说法、开头或句式：", ...phrases.map((p) => `- ${p}`)].join("\n");
 }
 
+function lengthSection(energy: Energy): string | null {
+  const hint = bubbleHint(energy);
+  return hint ? `## 这一轮回几条\n${hint}` : null;
+}
+
 export function buildSystemPrompt(
   parts: PromptParts,
-  opts: { now: Date; timeZone: string; memoryEnabled: boolean; facts: Fact[]; crisis: boolean; recent?: string[]; summary?: string | null },
+  opts: {
+    now: Date;
+    timeZone: string;
+    memoryEnabled: boolean;
+    facts: Fact[];
+    crisis: boolean;
+    recent?: string[];
+    summary?: string | null;
+    /** The user's energy this turn; sets how many bubbles to send. */
+    energy?: Energy;
+  },
 ): string {
   // Stable content first so the provider's prefix cache covers persona + examples.
   return [
@@ -114,7 +130,9 @@ export function buildSystemPrompt(
     situationSection(opts),
     opts.crisis ? parts.safety : null,
     opts.memoryEnabled ? styleSection(opts.facts) : null,
-    recentSection(opts.recent ?? []), // last: constraints closest to the question are followed best
+    recentSection(opts.recent ?? []),
+    // Last: constraints closest to the question are followed best.
+    opts.energy && !opts.crisis ? lengthSection(opts.energy) : null,
   ]
     .filter(Boolean)
     .join("\n\n");

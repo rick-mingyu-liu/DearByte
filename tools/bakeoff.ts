@@ -11,6 +11,7 @@ import { parseReply } from "../src/companion/output.ts";
 import { buildMessages, buildSystemPrompt, loadPromptParts } from "../src/companion/prompt.ts";
 import { toneReport, type ToneReport } from "../src/companion/tone.ts";
 import { looksLikeCrisis } from "../src/companion/safety.ts";
+import { userEnergy } from "../src/companion/energy.ts";
 import { loadConfig, ROOT } from "../src/config.ts";
 import type { Fact, StoredMessage } from "../src/domain.ts";
 import { loadImage } from "../src/media/images.ts";
@@ -90,6 +91,7 @@ async function main() {
       memoryEnabled: facts.length > 0,
       facts,
       crisis: looksLikeCrisis(c.user),
+      energy: userEnergy({ text: c.user, image: Boolean(c.image) }),
     });
     const messages = buildMessages(system, toHistory(c), {
       text: c.user,

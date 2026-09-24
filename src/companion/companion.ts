@@ -6,6 +6,7 @@ import type { Store } from "../storage/store.ts";
 import { FALLBACK_REPLY, parseReply, type Reply } from "./output.ts";
 import { buildMessages, buildSystemPrompt, factsForPrompt, recentPhrases, type PromptParts } from "./prompt.ts";
 import { modelSeesCrisis } from "./crisis-check.ts";
+import { userEnergy } from "./energy.ts";
 import { looksLikeCrisis } from "./safety.ts";
 import { localDate } from "./time.ts";
 
@@ -87,8 +88,9 @@ export class Companion {
         : null;
 
     const summary = memoryEnabled ? store.getSetting(SUMMARY_SETTING) : null;
+    const energy = userEnergy({ text: input.text, image: Boolean(input.image) });
     const prompt = (crisis: boolean) =>
-      buildMessages(buildSystemPrompt(parts, { now, timeZone, memoryEnabled, facts, crisis, recent: recentPhrases(history), summary }), history, input);
+      buildMessages(buildSystemPrompt(parts, { now, timeZone, memoryEnabled, facts, crisis, recent: recentPhrases(history), summary, energy }), history, input);
     let reply = await this.generate(prompt(crisis));
     if (check && (await check)) {
       crisis = true;

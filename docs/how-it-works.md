@@ -98,7 +98,7 @@ Then it fills in the text, presses Return, and confirms that a new `MeSaid:<text
 ## 2. How a reply is made
 
 1. **Collect.** Several quick messages (within about 1.5 s) become one turn, like a person reading a burst before answering. A photo in the burst is attached.
-2. **Build the prompt** (section 3) from the persona, examples, time, memory, recent chat and your new message.
+2. **Build the prompt** (section 3) from the persona, examples, time, memory, recent chat and your new message. Your message also gets an energy score (`src/companion/energy.ts`). A short, flat one (「嗯」「在干嘛」) tells 小拜 to answer in 1 bubble. A medium one gets 1 unless she has two different things to say. A long, excited one, or a photo, leaves it to her. Before this, almost every reply was 2 bubbles. Now it's 1.4 on average.
 3. **Call the model** in JSON mode: `{"bubbles": ["…", "…"]}`. Each string is one WeChat bubble.
 4. **Check the output.** If it isn't valid JSON or breaks the limits, there is one repair attempt; then salvage what's usable; then a fixed fallback. More than 2 bubbles are cut to 2, because a third bubble always read as AI over-explaining. Crisis replies are the exception.
 5. **Safety check in parallel.** A small classifier call runs alongside the reply (section 6).
@@ -120,7 +120,8 @@ The system prompt is built in this order. The stable parts come first, so DeepSe
 | 更早聊过的 | rolling summary | What you talked about before the recent window. |
 | Safety | `prompts/safety.zh-CN.md` | Only in a crisis: take it seriously, ask if you're safe, give 110/120/12356, be honest that it can't call anyone. |
 | Your style rules | `style` memories | How you asked 小拜 to talk (「叫我瑞克」「别叫我宝宝」). They override the persona's defaults. |
-| 最近说过的话 | last 3 replies | Phrases 小拜 just used, with "don't repeat these". This goes last, because instructions nearest the question are followed best. |
+| 最近说过的话 | last 3 replies | Phrases 小拜 just used, with "don't repeat these". |
+| 这一轮回几条 | energy score | How many bubbles to send this turn (see section 2). This goes last, because instructions nearest the question are followed best. Left out in a crisis. |
 
 Then come the last 40 messages verbatim, then your new message (with the photo, if any). When 小拜 writes first, the "user message" is a system note instead, e.g. 「用户现在没有发消息，是你主动找用户。今天用户有件事：考雅思……」 ("the user hasn't messaged; you're writing first. The user has something on today: the IELTS exam…"). Only 小拜's message is stored, and only once it has been sent.
 
