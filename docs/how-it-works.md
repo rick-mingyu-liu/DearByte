@@ -227,7 +227,7 @@ Commands while running: `/pause`, `/resume`, `/proactive on|off`, `/memory`, `/m
 | | What it means | Fixable? |
 |---|---|---|
 | Against WeChat's rules | 小拜's account could be restricted or banned. | No. Use the test account only. |
-| Locked to WeChat for Mac 3.8.4, English UI | An update breaks reading (row format) and photos (4.x encrypts them). | Only by staying on 3.8.4 |
+| Tied to WeChat for Mac's Accessibility layout, English UI | 4.x works for text, but its rows don't say who sent them, so 小拜 recognises her own bubbles by what she sent. 4.x encrypts photos, so she can't see them there. The next update could change the layout again. | Partly: 3.8.4 still sees photos |
 | Needs a Mac that's on, with the chat open | Close the chat or let the Mac sleep and 小拜 goes quiet. That Mac's WeChat can't be used for anything else. | Partly: alerts tell you; a spare Mac solves it |
 | Reads the screen, not real messages | If the chat scrolls or reloads during a burst, a message can be missed. It says so in the log. | Partly |
 | One contact, no groups | Can't serve friends or family yet. | Yes: memory per contact plus chat switching |

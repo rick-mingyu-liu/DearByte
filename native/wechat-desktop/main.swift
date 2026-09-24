@@ -23,6 +23,14 @@ func str(_ e: AXUIElement, _ name: String) -> String? { attr(e, name) as? String
 func kids(_ e: AXUIElement) -> [AXUIElement] { (attr(e, kAXChildrenAttribute) as? [AXUIElement]) ?? [] }
 func bool(_ e: AXUIElement, _ name: String) -> Bool? { attr(e, name) as? Bool }
 
+/// WeChat 4.x names its controls; 3.8.4 doesn't.
+func find(_ e: AXUIElement, identifier: String, depth: Int = 0) -> AXUIElement? {
+    if str(e, "AXIdentifier") == identifier { return e }
+    if depth > 14 { return nil }
+    for k in kids(e) { if let f = find(k, identifier: identifier, depth: depth + 1) { return f } }
+    return nil
+}
+
 func find(_ e: AXUIElement, role: String, description: String? = nil, depth: Int = 0) -> AXUIElement? {
     if str(e, kAXRoleAttribute) == role, description == nil || str(e, kAXDescriptionAttribute) == description { return e }
     if depth > 8 { return nil }
@@ -38,6 +46,8 @@ struct Chat {
     let window: AXUIElement
     let table: AXUIElement
     let composer: AXUIElement
+    /// WeChat 4.x: rows carry only the text, not who sent it.
+    let modern: Bool
     /// Return goes to WeChat's key window and its focused element, so both must
     /// be this chat's composer. WeChat reports the focused window and element
     /// even from another Space; the window list is empty there, so it's only a
@@ -61,12 +71,24 @@ struct Chat {
     var name: String { str(composer, kAXTitleAttribute) ?? "" }
     var draft: String { str(composer, kAXValueAttribute) ?? "" }
 
-    /// Row titles, oldest first: "MeSaid:…", "<nickname>Said:…", "<nickname>:Sent aPhoto", time labels, notices.
+    /// Row titles, oldest first.
+    /// 3.8.4: "MeSaid:…", "<nickname>Said:…", "<nickname>:Sent aPhoto", time labels, notices.
+    /// 4.x: "Bubble:…" for any message (the sender isn't exposed), time labels,
+    /// notices, and "" for rows scrolled out of view, which WeChat leaves unrendered.
     /// Throws rather than returning a short list when Accessibility doesn't answer,
     /// so a failed read never looks like an emptied chat.
     func rows() throws -> [String] {
         guard let children = attr(table, kAXChildrenAttribute) as? [AXUIElement] else {
             throw HelperError(message: "read_failed")
+        }
+        if modern {
+            return children.map { row in
+                switch str(row, "AXIdentifier") {
+                case "virtual_cell": return ""
+                case "chat_bubble_item_view": return "Bubble:" + (str(row, kAXTitleAttribute) ?? "")
+                default: return str(row, kAXTitleAttribute) ?? ""
+                }
+            }
         }
         return try children
             .filter { str($0, kAXRoleAttribute) == "AXRow" }
@@ -87,9 +109,12 @@ func openChat() throws -> Chat {
     guard let w = attr(root, kAXMainWindowAttribute) ?? attr(root, kAXFocusedWindowAttribute),
           CFGetTypeID(w) == AXUIElementGetTypeID() else { throw HelperError(message: "no_wechat_window") }
     let window = w as! AXUIElement
+    if let list = find(window, identifier: "chat_message_list"), let composer = find(window, identifier: "chat_input_field") {
+        return Chat(app: app, root: root, window: window, table: list, composer: composer, modern: true)
+    }
     guard let table = find(window, role: "AXTable", description: "Messages"),
           let composer = find(window, role: "AXTextArea") else { throw HelperError(message: "no_open_chat") }
-    return Chat(app: app, root: root, window: window, table: table, composer: composer)
+    return Chat(app: app, root: root, window: window, table: table, composer: composer, modern: false)
 }
 
 func pressReturn(_ app: NSRunningApplication) {
@@ -105,8 +130,10 @@ func send(chat boundName: String, text: String) throws -> [String: Any] {
     guard chat.name == boundName else { throw HelperError(message: "wrong_chat") }
     guard chat.draft.isEmpty else { throw HelperError(message: "composer_not_empty") }
     if let problem = chat.returnTarget(), problem != "not_focused" { throw HelperError(message: problem) }
-    let before = try chat.rows()
-    let expected = "MeSaid:\(text)"
+    // 4.x may draw emoji codes like [白眼] as pictures, so compare without them (as bubbleKey does on the Node side).
+    let key: (String) -> String = chat.modern ? bubbleKey : { $0 }
+    let before = try chat.rows().map(key)
+    let expected = key(chat.modern ? "Bubble:\(text)" : "MeSaid:\(text)")
     let tail = 3
 
     guard AXUIElementSetAttributeValue(chat.composer, kAXValueAttribute as CFString, text as CFString) == .success else {
@@ -129,7 +156,7 @@ func send(chat boundName: String, text: String) throws -> [String: Any] {
     let beforeCount = before.suffix(tail).filter { $0 == expected }.count
     for _ in 0..<24 {
         usleep(250_000)
-        guard let rows = try? chat.rows(), chat.draft.isEmpty else { continue }
+        guard let rows = (try? chat.rows())?.map(key), chat.draft.isEmpty else { continue }
         if appended(before, rows).contains(expected) || rows.suffix(tail).filter({ $0 == expected }).count > beforeCount {
             return ["ok": true]
         }
@@ -140,6 +167,12 @@ func send(chat boundName: String, text: String) throws -> [String: Any] {
         throw HelperError(message: "not_sent")
     }
     throw HelperError(message: "unconfirmed")
+}
+
+/// Bubble text without spaces or emoji codes; must match bubbleKey in rows.ts.
+func bubbleKey(_ row: String) -> String {
+    row.replacingOccurrences(of: "\\[[^\\[\\]\\s]{1,12}\\]", with: "", options: .regularExpression)
+        .replacingOccurrences(of: "\\s+", with: "", options: .regularExpression)
 }
 
 /// Takes our text back out of the composer. The composer was empty when we

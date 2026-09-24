@@ -29,6 +29,7 @@ import { FakeModel } from "./model/fake.ts";
 import { createModel, type ModelSettings } from "./model/providers.ts";
 import type { ChatModel } from "./model/provider.ts";
 import { Store } from "./storage/store.ts";
+import { acquireLock } from "./lock.ts";
 
 /** Where the chat name was saved before data/contacts.json; read once to migrate. */
 const LEGACY_CHAT_SETTING = "wechat_chat";
@@ -68,6 +69,13 @@ async function main() {
     console.error(`${config.model.problem}\n或用 --fake 测试。`);
     process.exit(1);
   }
+
+  const lock = acquireLock(join(ROOT, "data/runner.lock"));
+  if ("heldBy" in lock) {
+    console.error(`小拜已经在运行了（进程 ${lock.heldBy}）。同时开两个会互相回复，停掉那个再开，或者 kill ${lock.heldBy}。`);
+    process.exit(1);
+  }
+  process.on("exit", lock.release);
 
   const ui = new DesktopHelper();
   const store = Store.open(config.dbPath);

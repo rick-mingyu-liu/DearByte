@@ -68,7 +68,7 @@ Without a key, run `npm run companion -- --fake` to check the local flow. This m
 
 ### Chat in WeChat
 
-The WeChat connection uses macOS Accessibility to operate the desktop client. It currently targets **WeChat for Mac 3.8.4, with the English UI and a single one-to-one chat**. Accessibility permission and Swift are required; photos need a separate folder setting.
+The WeChat connection uses macOS Accessibility to operate the desktop client. It currently targets **WeChat for Mac 4.x (or 3.8.4), with the English UI and a single one-to-one chat**. On 4.x, 小拜 can't see photos yet. Accessibility permission and Swift are required; photos need a separate folder setting.
 
 This is an experimental demo route with a risk of account restrictions. Use a test account. See the [English user guide](docs/guide.en.md) for setup, draft mode, and pause/resume controls.
 
