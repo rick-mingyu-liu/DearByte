@@ -9,7 +9,7 @@ export type StoredMessage = {
   createdAt: string; // UTC ISO
 };
 
-export const FACT_CATEGORIES = ["profile", "preference", "event", "person", "pet", "shared"] as const;
+export const FACT_CATEGORIES = ["profile", "preference", "event", "person", "pet", "shared", "style"] as const;
 export type FactCategory = (typeof FACT_CATEGORIES)[number];
 
 export type Fact = {

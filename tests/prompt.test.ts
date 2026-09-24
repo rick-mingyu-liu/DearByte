@@ -65,6 +65,21 @@ test("memory on lists facts as records with dates", () => {
   expect(system).toContain("- 用户下周六考雅思（event；日期 2026-10-03；记录于 2026-09-21）");
 });
 
+test("style requests become standing rules near the end, not ordinary records", () => {
+  const style = fact({ id: 9, category: "style", value: "用户不喜欢被叫宝宝", eventDate: null });
+  const system = buildSystemPrompt(parts, { now, timeZone: "Asia/Shanghai", memoryEnabled: true, facts: [fact({}), style], crisis: false, recent: ["哈哈哈哈哈"] });
+  const rules = system.indexOf("## 用户对你说话方式的要求");
+  expect(rules).toBeGreaterThan(system.indexOf("## 现在"));
+  expect(rules).toBeLessThan(system.indexOf("## 最近说过的话"));
+  expect(system).toContain("以这里为准：\n- 用户不喜欢被叫宝宝");
+  expect(system).not.toContain("用户不喜欢被叫宝宝（style");
+
+  const off = buildSystemPrompt(parts, { now, timeZone: "Asia/Shanghai", memoryEnabled: false, facts: [], crisis: false });
+  expect(off).not.toContain("说话方式的要求");
+  const onlyStyle = buildSystemPrompt(parts, { now, timeZone: "Asia/Shanghai", memoryEnabled: true, facts: [style], crisis: false });
+  expect(onlyStyle).toContain("暂时没有别的记录");
+});
+
 test("past events drop out after the relevance window", () => {
   const facts = [
     fact({ id: 1, eventDate: "2026-09-20" }), // 4 days ago: kept
