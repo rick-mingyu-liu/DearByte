@@ -77,6 +77,8 @@ struct Chat {
     /// The composer's title is the open chat's name.
     var name: String { str(composer, kAXTitleAttribute) ?? "" }
     var draft: String { str(composer, kAXValueAttribute) ?? "" }
+    /// The composer's text, or nil when Accessibility didn't answer.
+    var draftIfRead: String? { str(composer, kAXValueAttribute) }
 
     /// Row titles, oldest first.
     /// 3.8.4: "MeSaid:…", "<nickname>Said:…", "<nickname>:Sent aPhoto", time labels, notices.
@@ -84,29 +86,33 @@ struct Chat {
     /// notices, and "" for rows scrolled out of view, which WeChat leaves unrendered.
     /// Throws rather than returning a short list when Accessibility doesn't answer,
     /// so a failed read never looks like an emptied chat.
-    func rows() throws -> [String] {
+    /// The newest rows, and on 4.x where they start in the whole list (`offset`).
+    /// 4.x keeps a placeholder for every row ever scrolled past and only appends,
+    /// so the offset tells the channel exactly how far the window moved; reading
+    /// every row each time cost more Accessibility calls as the day went on.
+    func recent() throws -> (rows: [String], offset: Int?) {
         guard let all = attr(table, kAXChildrenAttribute) as? [AXUIElement] else {
             throw HelperError(message: "read_failed")
         }
-        // Only the newest rows: 4.x keeps a placeholder for every row ever
-        // scrolled past, and each row costs Accessibility calls. The channel
-        // aligns snapshots allowing up to 50 rows to drop off the top.
-        let children = all.suffix(recentRows)
         if modern {
-            return children.map { row in
+            let children = all.suffix(recentRows)
+            return (children.map { row in
                 switch str(row, "AXIdentifier") {
                 case "virtual_cell": return ""
                 case "chat_bubble_item_view": return "Bubble:" + (str(row, kAXTitleAttribute) ?? "")
                 default: return str(row, kAXTitleAttribute) ?? ""
                 }
-            }
+            }, all.count - children.count)
         }
-        return try children
+        // 3.8.4 drops old rows from the top itself, so there's no stable offset.
+        let rows = try all
             .filter { str($0, kAXRoleAttribute) == "AXRow" }
+            .suffix(recentRows)
             .map { row in
                 guard let cells = attr(row, kAXChildrenAttribute) as? [AXUIElement] else { throw HelperError(message: "read_failed") }
                 return cells.flatMap { kids($0) }.compactMap { str($0, kAXTitleAttribute) }.joined()
             }
+        return (rows, nil)
     }
 }
 
@@ -119,7 +125,8 @@ extension Chat {
     var stillThere: Bool {
         guard !app.isTerminated,
               let main = attr(root, kAXMainWindowAttribute), CFGetTypeID(main) == AXUIElementGetTypeID(), CFEqual(main, window),
-              str(table, kAXRoleAttribute) != nil, str(composer, kAXRoleAttribute) != nil else { return false }
+              str(table, kAXRoleAttribute) != nil, str(composer, kAXRoleAttribute) != nil,
+              let owner = attr(composer, kAXWindowAttribute), CFGetTypeID(owner) == AXUIElementGetTypeID(), CFEqual(owner, window) else { return false }
         return !modern || (str(table, "AXIdentifier") == "chat_message_list" && str(composer, "AXIdentifier") == "chat_input_field")
     }
 }
@@ -179,9 +186,14 @@ func send(chat boundName: String, text: String) throws -> [String: Any] {
 
     // Sent means Return took our text out of the composer. Which row is ours
     // is the channel's call (rows.ts), so matching rules live in one place.
+    // An unanswered read isn't "empty", and another chat's empty draft isn't ours:
+    // those end as unconfirmed, never as sent.
+    var emptyReads = 0
     for _ in 0..<24 {
         usleep(250_000)
-        if chat.draft.isEmpty { return ["ok": true] }
+        guard chat.name == boundName else { throw HelperError(message: "unconfirmed") }
+        emptyReads = chat.draftIfRead == "" ? emptyReads + 1 : 0
+        if emptyReads >= 2 { return ["ok": true] }
     }
     // Return may or may not have gone through; never retry blindly.
     if chat.draft.hasPrefix(text) {
@@ -286,7 +298,8 @@ while let line = readLine() {
         switch cmd {
         case "snapshot":
             let chat = try openChat()
-            reply(["id": id, "ok": true, "chat": chat.name, "rows": try chat.rows(), "draft": !chat.draft.isEmpty])
+            let recent = try chat.recent()
+            reply(["id": id, "ok": true, "chat": chat.name, "rows": recent.rows, "offset": recent.offset ?? NSNull(), "draft": !chat.draft.isEmpty])
         case "check":
             // Read-only: would a send go to this chat's composer right now?
             let chat = try openChat()

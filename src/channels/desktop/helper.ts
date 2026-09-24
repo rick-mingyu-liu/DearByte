@@ -11,7 +11,8 @@ const SOURCE = join(ROOT, "native/wechat-desktop/main.swift");
 const BINARY = join(ROOT, ".build/wechat-desktop");
 const REQUEST_TIMEOUT_MS = 15_000;
 
-export type Snapshot = { chat: string; rows: string[]; draft: boolean };
+/** `offset`: WeChat 4.x, where `rows` (the newest ones) start in the whole list; null on 3.8.4. */
+export type Snapshot = { chat: string; rows: string[]; draft: boolean; offset?: number | null };
 
 /** What the channel needs from WeChat; the tests use a fake. */
 export type WechatUi = {
@@ -117,8 +118,8 @@ export class DesktopHelper implements WechatUi {
   }
 
   async snapshot(): Promise<Snapshot> {
-    const { chat, rows, draft } = await this.request<Snapshot>({ cmd: "snapshot" });
-    return { chat, rows, draft };
+    const { chat, rows, draft, offset } = await this.request<Snapshot>({ cmd: "snapshot" });
+    return { chat, rows, draft, offset: offset ?? null };
   }
 
   async send(chat: string, text: string): Promise<void> {

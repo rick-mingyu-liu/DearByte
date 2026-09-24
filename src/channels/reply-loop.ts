@@ -186,7 +186,12 @@ export class ReplyLoop<M extends Incoming<unknown>> {
     const wait = readDelay(message.text, message.image !== null, this.random()) - ((this.deps.now ?? Date.now)() - started);
     if (wait > 0) await this.sleep(wait);
     // Only what reached the chat is remembered as said.
-    commit(await this.sendAll(message, bubbles));
+    const sent = await this.sendAll(message, bubbles);
+    try {
+      commit(sent);
+    } catch (err) {
+      this.emit({ type: "error", message: `回复已发出，但没存进聊天记录：${(err as Error).message}` });
+    }
   }
 
   /**
