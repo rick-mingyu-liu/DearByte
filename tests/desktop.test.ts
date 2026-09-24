@@ -116,7 +116,9 @@ test("falls back to the thumbnail when the full-size photo never arrives", async
 
 // --- Channel ---------------------------------------------------------------
 
-function setup(opts: { responses?: ConstructorParameters<typeof FakeModel>[0]; mode?: Mode; sendErrors?: string[]; photos?: PhotoFolder; names?: string[] } = {}) {
+function setup(
+  opts: { responses?: ConstructorParameters<typeof FakeModel>[0]; mode?: Mode; sendErrors?: string[]; photos?: PhotoFolder; names?: string[]; capture?: () => Promise<Uint8Array> } = {},
+) {
   const names = opts.names ?? [CHAT];
   const sentTo: string[] = [];
   const store = Store.open(":memory:");
@@ -133,6 +135,7 @@ function setup(opts: { responses?: ConstructorParameters<typeof FakeModel>[0]; m
       if (code) throw new HelperError(code);
       sent.push(text);
     },
+    ...(opts.capture ? { capturePhoto: opts.capture } : {}),
     close: () => {},
   };
   const events: DesktopEvent[] = [];
@@ -488,4 +491,30 @@ test("4.x: a bubble that failed before sending isn't expected, so the user can s
   channel.poll({ chat: CHAT, rows: [bubble("hi"), bubble("在吗"), bubble("在")] });
   await channel.settle();
   expect(model.calls).toHaveLength(2);
+});
+
+test("4.x: a photo row is cut out of WeChat's window and shown to the model", async () => {
+  let captures = 0;
+  const { channel, model } = setup({ responses: [reply("炒鸡啊")], capture: async () => (captures++, JPEG) });
+  channel.poll({ chat: CHAT, rows: [bubble("hi")] });
+  channel.poll({ chat: CHAT, rows: [bubble("hi"), bubble("Image")] });
+  await channel.settle();
+  expect(captures).toBe(1);
+  expect(JSON.stringify(model.calls[0].messages.at(-1))).toContain("data:image/jpeg;base64,");
+});
+
+test("4.x: when the capture fails, 小拜 is told she can't see it, not given the word Image", async () => {
+  const { channel, model, events } = setup({
+    responses: [reply("没看到")],
+    capture: async () => {
+      throw new HelperError("no_screen_permission");
+    },
+  });
+  channel.poll({ chat: CHAT, rows: [bubble("hi")] });
+  channel.poll({ chat: CHAT, rows: [bubble("hi"), bubble("Image")] });
+  await channel.settle();
+  const sent = JSON.stringify(model.calls[0].messages.at(-1));
+  expect(sent).toContain("看不到");
+  expect(sent).not.toContain("Image");
+  expect(events.some((e) => e.type === "status" && e.message.includes("屏幕与系统录音"))).toBe(true);
 });

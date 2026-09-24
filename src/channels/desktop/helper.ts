@@ -17,6 +17,8 @@ export type Snapshot = { chat: string; rows: string[]; draft: boolean };
 export type WechatUi = {
   snapshot(): Promise<Snapshot>;
   send(chat: string, text: string): Promise<void>;
+  /** WeChat 4.x: the newest photo in the open chat, cut out of WeChat's window. */
+  capturePhoto?(): Promise<Uint8Array>;
   close(): void;
 };
 
@@ -42,6 +44,10 @@ const HELPER_MESSAGES: Record<string, string> = {
   other_window_open: "微信开着另一个聊天窗口，回车可能发到那边，没有发送（关掉独立的聊天窗口）",
   window_unknown: "看不出微信当前是哪个窗口在前，没有发送（把微信切到当前桌面看一眼）",
   read_failed: "读取聊天记录失败",
+  no_screen_permission: "没有“屏幕与系统录音”权限，看不到微信里的图（系统设置 → 隐私与安全性 → 屏幕与系统录音，打开运行小拜的终端，再重启终端）",
+  photo_not_visible: "图片不在屏幕上（聊天被往上翻了？）",
+  capture_failed: "截取微信窗口里的图片失败",
+  capture_unsupported: "这个版本的微信不支持从窗口取图",
   helper_exited: "微信助手进程退出了，下次会重启",
   helper_failed: "微信助手进程启动失败",
   helper_timeout: "微信助手没有响应",
@@ -117,6 +123,11 @@ export class DesktopHelper implements WechatUi {
 
   async send(chat: string, text: string): Promise<void> {
     await this.request({ cmd: "send", chat, text });
+  }
+
+  async capturePhoto(): Promise<Uint8Array> {
+    const { jpeg } = await this.request<{ jpeg: string }>({ cmd: "capture_photo" });
+    return new Uint8Array(Buffer.from(jpeg, "base64"));
   }
 
   close(): void {

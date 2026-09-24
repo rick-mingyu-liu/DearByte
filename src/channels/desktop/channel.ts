@@ -20,6 +20,8 @@ const BUSY_WAIT_MS = 3_000;
 const OUTGOING_TTL_MS = 5 * 60_000;
 /** WeChat 4.x: a blank row filling in counts as new only this close to the newest row; higher up, it's the user scrolling. */
 const LOADING_ROWS = 3;
+/** WeChat 4.x: a new photo shows a blurred preview first; give it this long to sharpen. */
+const PHOTO_SETTLE_MS = 1_500;
 /** WeChat 4.x: a bubble matching anything 小拜 said this recently is taken as hers, never answered. */
 const ECHO_MS = 10 * 60_000;
 /** More turns than this within RUNAWAY_MS means something is looping: pause instead. */
@@ -28,8 +30,8 @@ const RUNAWAY_MS = 60_000;
 /** Send errors after which the bubble may still have reached WeChat. */
 const MAYBE_SENT = new Set(["unconfirmed", "helper_timeout", "helper_exited"]);
 
-/** `count` photos arrived in this burst; 小拜 sees the newest. */
-export type PhotoRef = { seenAt: number; count: number };
+/** `count` photos arrived in this burst; 小拜 sees the newest. `fromWindow`: WeChat 4.x, cut out of WeChat's window. */
+export type PhotoRef = { seenAt: number; count: number; fromWindow?: boolean };
 export type DesktopMessage = Incoming<PhotoRef>;
 export type Mode = "auto" | "draft";
 
@@ -208,7 +210,9 @@ export class DesktopChannel {
           this.emit({ type: "status", message: `读到一条和小拜刚说过的一样的话，当作她自己的，没有回复：${row.text.slice(0, 30)}` });
         } else {
           const label = bubbleLabel(row.text);
-          messages.push({ text: label ? describeOther(label) : row.text, image: null });
+          if (label && /^(image|photo|picture|图片|照片)$/i.test(label) && this.deps.ui.capturePhoto) {
+            messages.push({ text: "", image: { seenAt: now, count: 1, fromWindow: true } });
+          } else messages.push({ text: label ? describeOther(label) : row.text, image: null });
         }
         continue;
       }
@@ -235,7 +239,7 @@ export class DesktopChannel {
     if (this.paused) {
       this.emit({ type: "skipped", count: messages.length });
       // Claim the skipped photos so they aren't mistaken for the next one.
-      const photos = messages.filter((m) => m.image).length;
+      const photos = messages.filter((m) => m.image && !m.image.fromWindow).length;
       if (photos) this.deps.photos?.claim(now, photos).catch(() => {});
       return;
     }
@@ -250,6 +254,16 @@ export class DesktopChannel {
   }
 
   private async loadPhoto(ref: PhotoRef): Promise<Uint8Array> {
+    if (ref.fromWindow && this.deps.ui.capturePhoto) {
+      const wait = ref.seenAt + PHOTO_SETTLE_MS - (this.deps.now?.() ?? Date.now());
+      if (wait > 0) await this.sleep(wait);
+      try {
+        return await this.deps.ui.capturePhoto();
+      } catch (err) {
+        this.emit({ type: "status", message: `取图失败：${(err as Error).message}` });
+        throw err;
+      }
+    }
     if (!this.deps.photos) throw new Error("没有设置 COMPANION_WECHAT_MEDIA_DIR，读不到图片");
     return this.deps.photos.claim(ref.seenAt, ref.count);
   }
