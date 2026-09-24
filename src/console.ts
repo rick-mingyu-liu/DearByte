@@ -60,6 +60,8 @@ export function describeReplyEvent(e: ReplyEvent): string | null {
       return `小拜（草稿，未发送）› ${e.bubble}`;
     case "turn":
       return null;
+    case "initiated":
+      return `小拜主动发消息：${e.reason}`;
     case "error":
       return `出错：${e.message}`;
   }

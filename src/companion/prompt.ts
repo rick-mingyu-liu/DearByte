@@ -110,13 +110,20 @@ function historyContent(m: StoredMessage): string {
   return m.hasImage ? `[图片]${m.text ? `\n${m.text}` : ""}` : m.text;
 }
 
+/** Stands in for the user's silence between two of 小拜's messages. */
+export const QUIET_GAP = "（这段时间用户没有说话，下面是你主动发的）";
+
 export function buildMessages(
   system: string,
   history: StoredMessage[],
   current: { text: string; image?: ImageInput },
 ): ChatMessage[] {
   const messages: ChatMessage[] = [{ role: "system", content: system }];
-  for (const m of history) messages.push({ role: m.role, content: historyContent(m) });
+  for (const [i, m] of history.entries()) {
+    // A proactive message follows 小拜's own last reply; say the user was quiet in between.
+    if (m.role === "assistant" && history[i - 1]?.role === "assistant") messages.push({ role: "user", content: QUIET_GAP });
+    messages.push({ role: m.role, content: historyContent(m) });
+  }
 
   const text = current.text || "（用户只发了一张图，没有配文字）";
   if (!current.image) {

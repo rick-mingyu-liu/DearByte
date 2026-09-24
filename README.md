@@ -28,6 +28,8 @@ npm run dearbyte -- --chat 张三   # first run: bind the chat to answer (the na
 npm run dearbyte                  # later runs: the bound chat is remembered
 npm run dearbyte -- --draft       # generate replies in the terminal without sending them
 npm run dearbyte -- --fake        # no model calls; replies are labelled fake
+npm run dearbyte -- --memory on   # turn long-term memory on (or off); remembered
+npm run dearbyte -- --proactive off  # 小拜 never writes first; on by default, remembered
 ```
 
 Then chat with 小拜 from your phone. The terminal shows each message, each bubble sent, and the per-turn log lines. Terminal commands:
@@ -35,6 +37,7 @@ Then chat with 小拜 from your phone. The terminal shows each message, each bub
 | Command | What it does |
 |---|---|
 | `/pause`, `/resume` | Stop and restart replies. Messages that arrive while paused are skipped, not answered later. |
+| `/proactive on` / `off` | Whether 小拜 writes first (below) |
 | `/memory …`, `/history clear` | Same as in the simulator (below) |
 | `/status`, `/help`, `/quit` | Show status, show help, quit |
 
@@ -43,6 +46,12 @@ How it behaves:
 - **Bursts:** several quick messages (within about 1.5 s) become one turn.
 - **Timing:** the first bubble comes 1.5–3.5 s after the message at the earliest, as if reading it; later bubbles take about as long as typing them, with some jitter.
 - **Photos:** read from WeChat's local image folder for that chat (`COMPANION_WECHAT_MEDIA_DIR`). Without it, 小拜 is told it can't see the picture. Stickers, voice, video and files are described to 小拜 as things it can't open.
+- **Writing first:** 小拜 sometimes messages you unprompted, like a friend would:
+  - a good morning on some days (about 6 in 10), at a random time between 8:00 and 9:30, if you haven't talked yet that day;
+  - on the day of an event it remembers (an exam, an interview), some luck in the morning and a "how did it go?" in the evening (this needs memory on);
+  - a check-in after 20 hours or more without hearing from you, in the afternoon.
+
+  It never writes between 22:30 and 8:00, sends at most 2 a day, waits 90 minutes after a conversation, and never sends another until you've replied to the last one. It checks once a minute and only when the chat is open and replies aren't paused. Draft mode never writes first.
 - **Sending:** the helper types each bubble into the composer and presses Return, then confirms the bubble appeared. It never sends while someone has a draft in the composer, and never resends a bubble it couldn't confirm.
 
 **Risk:** Tencent doesn't allow automating WeChat. The 小拜 account could be restricted, so use a test account, not your personal one. This route is for the demo only and can't be part of a product.

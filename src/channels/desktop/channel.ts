@@ -96,6 +96,15 @@ export class DesktopChannel {
     return this.loop.settle();
   }
 
+  /**
+   * 小拜 writes first, if the bound chat is open and in sync, replies aren't
+   * paused, and no reply is in progress. Resolves true once it was attempted.
+   */
+  async initiate(reason: string, generate: () => Promise<string[]>): Promise<boolean> {
+    if (this.seen === null || this.lastStatus || this.paused || this.stopping) return false;
+    return (await this.loop.initiate(reason, generate)) === true;
+  }
+
   /** Polls until `signal` aborts. Messages already in the chat at start are never answered. */
   async run(signal: AbortSignal): Promise<void> {
     while (!signal.aborted) {

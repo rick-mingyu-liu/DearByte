@@ -17,6 +17,7 @@ export type ReplyEvent =
   | { type: "sent"; bubble: string }
   | { type: "drafted"; bubble: string }
   | { type: "turn"; turn: TurnResult }
+  | { type: "initiated"; reason: string }
   | { type: "error"; message: string };
 
 export type SendResult = "sent" | "drafted" | "failed";
@@ -25,8 +26,8 @@ export type Outlet<M extends Incoming<unknown>> = {
   /** Several messages that arrived together → one turn. */
   merge(batch: M[]): M;
   loadImage(ref: NonNullable<M["image"]>): Promise<Uint8Array>;
-  /** Sends one bubble; the outlet handles its own retries. */
-  sendBubble(message: M, bubble: string): Promise<SendResult>;
+  /** Sends one bubble; the outlet handles its own retries. `message` is null when 小拜 writes first. */
+  sendBubble(message: M | null, bubble: string): Promise<SendResult>;
   typing?(message: M, on: boolean): Promise<void>;
 };
 
@@ -114,6 +115,35 @@ export class ReplyLoop<M extends Incoming<unknown>> {
     }
   }
 
+  /**
+   * 小拜 writes first. Returns false without doing anything while a reply is
+   * queued or being sent; the caller tries again later. Messages that arrive
+   * meanwhile are answered afterwards.
+   */
+  initiate(reason: string, generate: () => Promise<string[]>): Promise<boolean> | false {
+    if (this.busy || this.queue.length) return false;
+    this.busy = true;
+    const work = (async () => {
+      try {
+        this.emit({ type: "initiated", reason });
+        let bubbles: string[];
+        try {
+          bubbles = await generate();
+        } catch (err) {
+          this.emit({ type: "error", message: `主动消息生成失败：${(err as Error).message}` });
+          return true;
+        }
+        await this.sendAll(null, bubbles);
+        return true;
+      } finally {
+        this.busy = false;
+        if (this.queue.length) this.track(this.drain());
+      }
+    })();
+    this.track(work);
+    return work;
+  }
+
   private async answer(message: M, merged: number): Promise<void> {
     const { companion, outlet } = this.deps;
     const started = (this.deps.now ?? Date.now)();
@@ -143,21 +173,25 @@ export class ReplyLoop<M extends Incoming<unknown>> {
       bubbles = FALLBACK_REPLY.bubbles;
     }
 
+    const wait = readDelay(this.random()) - ((this.deps.now ?? Date.now)() - started);
+    if (wait > 0) await this.sleep(wait);
+    await this.sendAll(message, bubbles, () => typing(true));
+    await typing(false);
+  }
+
+  /** Sends bubbles in order with a typing pause before each after the first; stops at a failure. */
+  private async sendAll(message: M | null, bubbles: string[], typing?: () => Promise<void>): Promise<void> {
     for (const [i, bubble] of bubbles.entries()) {
-      if (i === 0) {
-        const wait = readDelay(this.random()) - ((this.deps.now ?? Date.now)() - started);
-        if (wait > 0) await this.sleep(wait);
-      } else {
-        await typing(true);
+      if (i > 0) {
+        await typing?.();
         await this.sleep(bubbleDelay(bubble, this.random()));
       }
-      const result = await outlet.sendBubble(message, bubble).catch(() => "failed" as const);
+      const result = await this.deps.outlet.sendBubble(message, bubble).catch(() => "failed" as const);
       if (result === "failed") {
         this.emit({ type: "error", message: `第 ${i + 1} 条气泡发送失败，后面的不再发（聊天记录里仍保存着完整回复）` });
         break;
       }
       this.emit({ type: result, bubble });
     }
-    await typing(false);
   }
 }

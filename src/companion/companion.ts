@@ -104,6 +104,29 @@ export class Companion {
     return { reply, userMessage, assistantMessage, memory };
   }
 
+  /**
+   * 小拜 messages first. `note` says why (a good morning, an exam today…); it
+   * reaches the model as a system note, and only the reply is stored.
+   */
+  async initiate(note: string): Promise<Reply> {
+    const { store, parts, timeZone } = this.deps;
+    const now = this.deps.now?.() ?? new Date();
+    const history = store.recentMessages(this.deps.historyMessages);
+    const memoryEnabled = store.memoryEnabled();
+    const facts = memoryEnabled ? factsForPrompt(store.activeFacts(), localDate(now, timeZone)) : [];
+    const system = buildSystemPrompt(parts, { now, timeZone, memoryEnabled, facts, crisis: false, recent: recentPhrases(history) });
+    const text =
+      `（系统提示，不是用户说的）用户现在没有发消息，是你主动找用户。${note}\n` +
+      "像朋友随手发的微信那样开个头：1 条，最多 2 条，每条很短。不要说“提醒你”“我记得你说过”“根据记录”，不要用“在吗”开头。";
+    let reply = await this.generate(buildMessages(system, history, { text }));
+    if (reply.bubbles.length > CHAT_MAX_BUBBLES) {
+      this.emit({ type: "reply_trimmed", dropped: reply.bubbles.slice(CHAT_MAX_BUBBLES) });
+      reply = { bubbles: reply.bubbles.slice(0, CHAT_MAX_BUBBLES) };
+    }
+    store.addMessage("assistant", reply.bubbles.join("\n"), { bubbles: reply.bubbles, createdAt: now.toISOString() });
+    return reply;
+  }
+
   /** One call, one repair attempt, then salvage or a fixed fallback. */
   private async generate(messages: ChatMessage[]): Promise<Reply> {
     const first = await this.call(messages, "reply");

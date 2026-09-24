@@ -5,13 +5,17 @@
 //   npm run dearbyte -- --draft      # show replies in the terminal, never send
 //   npm run dearbyte -- --chat 张三   # bind (or rebind) the chat to answer
 //   npm run dearbyte -- --fake       # no model calls; replies are labelled fake
+//   npm run dearbyte -- --memory on  # long-term memory on (or off); saved
+//   npm run dearbyte -- --proactive off  # 小拜 never writes first (on by default); saved
 
 import { createInterface } from "node:readline/promises";
 import { DesktopChannel, type DesktopEvent } from "./channels/desktop/channel.ts";
 import { DesktopHelper } from "./channels/desktop/helper.ts";
 import { PhotoFolder } from "./channels/desktop/photos.ts";
 import { Companion } from "./companion/companion.ts";
+import { dayState, planProactive, type ProactiveState } from "./companion/proactive.ts";
 import { loadPromptParts } from "./companion/prompt.ts";
+import { localDate } from "./companion/time.ts";
 import { loadConfig, ROOT } from "./config.ts";
 import { COMMON_HELP, describeEvent, describeReplyEvent, log, runSharedCommand } from "./console.ts";
 import { DeepSeekModel } from "./model/deepseek.ts";
@@ -20,9 +24,14 @@ import type { ChatModel } from "./model/provider.ts";
 import { Store } from "./storage/store.ts";
 
 const CHAT_SETTING = "wechat_chat";
+const PROACTIVE_SETTING = "proactive_enabled";
+const PROACTIVE_STATE = "proactive_state";
+/** How often to consider writing first. */
+const PROACTIVE_TICK_MS = 60_000;
 const HELP = `命令（聊天请用手机微信发给小拜）：
   /pause                暂停：新消息跳过，不回复
   /resume               恢复自动回复
+  /proactive on | off   小拜会不会主动找你（早安、考试打气、好久没聊时问候）
 ${COMMON_HELP}`;
 
 function describeDesktopEvent(e: DesktopEvent): string | null {
@@ -80,6 +89,19 @@ async function main() {
     log(`绑定聊天「${chat}」：小拜只回复这个聊天。换聊天用 --chat <名字>`);
   }
 
+  for (const [flag, apply] of [
+    ["--memory", (on: boolean) => store.setMemoryEnabled(on)],
+    ["--proactive", (on: boolean) => store.setSetting(PROACTIVE_SETTING, String(on))],
+  ] as const) {
+    const value = argValue(argv, flag);
+    if (value === "on" || value === "off") apply(value === "on");
+    else if (argv.includes(flag)) {
+      console.error(`${flag} 后面要写 on 或 off`);
+      process.exit(1);
+    }
+  }
+  const proactiveEnabled = () => store.getSetting(PROACTIVE_SETTING) !== "false";
+
   let photos: PhotoFolder | null = null;
   if (config.wechatMediaDir) {
     photos = new PhotoFolder(config.wechatMediaDir);
@@ -116,16 +138,46 @@ async function main() {
     log(
       `模型 ${model.name}${fake ? "（假模型，会发出标明是假的回复）" : ""} · ${store.messageCount()} 条聊天记录 · ` +
         `长期记忆${store.memoryEnabled() ? `开启（${store.activeFacts().length} 条）` : "关闭"} · ` +
-        `微信「${chat}」· ${channel.mode === "draft" ? "草稿模式（不发送）" : channel.paused ? "已暂停" : "自动回复"}`,
+        `主动消息${proactiveEnabled() ? "开启" : "关闭"} · 微信「${chat}」· ${channel.mode === "draft" ? "草稿模式（不发送）" : channel.paused ? "已暂停" : "自动回复"}`,
     );
   status();
 
   const stop = new AbortController();
   const running = channel.run(stop.signal);
+
+  // Once a minute: should 小拜 write first? The plan's rules keep it rare.
+  let ticking = false;
+  const tick = async () => {
+    if (ticking || !proactiveEnabled() || channel.mode === "draft") return;
+    ticking = true;
+    try {
+      const now = new Date();
+      const saved = store.getSetting(PROACTIVE_STATE);
+      const state = dayState(saved ? (JSON.parse(saved) as ProactiveState) : null, localDate(now, config.timeZone), Math.random);
+      store.setSetting(PROACTIVE_STATE, JSON.stringify(state));
+      const plan = planProactive({
+        now,
+        timeZone: config.timeZone,
+        state,
+        history: store.recentMessages(config.historyMessages),
+        facts: store.memoryEnabled() ? store.activeFacts() : [],
+      });
+      if (!plan) return;
+      const attempted = await channel.initiate(plan.key, async () => (await companion.initiate(plan.note)).bubbles);
+      // Recorded once attempted, sent or not, so a failure isn't retried every minute.
+      if (attempted) store.setSetting(PROACTIVE_STATE, JSON.stringify({ ...state, sent: [...state.sent, plan.key], lastAt: now.toISOString() }));
+    } catch (err) {
+      log(`主动消息出错：${(err as Error).message}`);
+    } finally {
+      ticking = false;
+    }
+  };
+  const ticker = setInterval(() => void tick(), PROACTIVE_TICK_MS);
   let closing: Promise<void> | undefined;
   const shutdown = () =>
     (closing ??= (async () => {
       rl?.close();
+      clearInterval(ticker);
       channel.stopping = true; // type nothing more into WeChat
       stop.abort();
       await running;
@@ -159,6 +211,9 @@ async function main() {
       } else if (line === "/resume") {
         channel.resume();
         log("已恢复自动回复。暂停期间的消息不会补回");
+      } else if (line === "/proactive on" || line === "/proactive off") {
+        store.setSetting(PROACTIVE_SETTING, String(line.endsWith("on")));
+        log(line.endsWith("on") ? "主动消息已开启：每天最多 2 条，晚上不发，上一条没回不再发" : "主动消息已关闭");
       } else if (!(await runSharedCommand(line, { store, timeZone: config.timeZone, settle }))) {
         log(line.startsWith("/") ? `未知命令 ${line.split(/\s+/)[0]}，输入 /help 查看` : "这里只能输入命令，聊天请用手机微信发给小拜");
       }

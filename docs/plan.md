@@ -63,6 +63,9 @@ Record the results in `docs/design/wechat-transport.md`.
 - [x] **Less AI-sounding replies** (2026-09-24): identity rules, 「说人话」, short bubbles, photo reactions, anti-repeat, human timing, and an AI-tone score in the bake-off. See [the design note](design/humanlike-replies.md).
 - [ ] Check photo replies with real test photos, and consider learning style from a consented real chat export.
 - [ ] **Stickers from WeChat's own packs** on a dedicated Mac: click the sticker panel by grid position (plan in [the transport notes](design/wechat-transport.md#stickers-and-pictures-probed-2026-09-24)).
+- [x] **Proactive messages** (2026-09-24): good mornings, event luck and follow-ups, check-ins after a silence; at most 2 a day, never at night, never double-texting (`src/companion/proactive.ts`).
+- [ ] **Memory search:** once facts pass about 100, retrieve the relevant ones (SQLite FTS5 over facts and old messages) instead of putting all of them in the prompt.
+- [ ] **Learning from feedback:** notice when the user pushes back on how 小拜 talks (「别叫我宝宝」「说话别这么长」) and keep it as a lasting style rule, reviewed like other memories.
 - [ ] **Rolling summary:** today the prompt gets the last 40 messages verbatim. Add a short running summary so longer relationships stay coherent without prompt costs growing.
 - [ ] **Forgetting:** `/memory forget` should also remove the fact from recent history sent to the model, not only from the fact table.
 - [ ] **Memory claims:** 小拜 sometimes says 「我都记着」 when memory is off. Tighten the persona and add a bake-off case.
