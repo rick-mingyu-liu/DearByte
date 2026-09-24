@@ -26,28 +26,3 @@ The following files informed the conversational rules in `prompts/persona.zh-CN.
 The upstream guides often suggest "share a similar experience of your own" (我上次也……). The companion is an openly fictional AI, so the persona replaces this with opinions, observations from the conversation, and remembered history. It never invents human experiences.
 
 If upstream text is ever vendored into `references/goutoujunshi/`, include the upstream `LICENSE` file alongside it.
-
-## Tencent `@tencent-weixin/openclaw-weixin` (iLink protocol)
-
-- Source: https://github.com/Tencent/openclaw-weixin (npm package version 2.4.9)
-- License: MIT, Copyright (C) 2026 Tencent. The notice is copied to `docs/third-party/openclaw-weixin-LICENSE`, because `src/channels/ilink/` closely follows parts of it.
-
-### How it is used
-
-It is the protocol reference for `src/channels/ilink/`. OpenClaw is **not** installed or imported, and no upstream files are vendored.
-
-Short protocol helpers are re-implemented from it, and are close to the original:
-
-- request headers and `base_info`
-- the client-version encoding
-- the lossless uint64 ID parser
-- AES key parsing
-
-The following come from it: endpoint names, body shapes, QR status values, and the retry and backoff constants.
-
-### Deliberate deviations
-
-- **What we implement:** only QR login, getting updates, downloading and decrypting photos, sending text, and the typing indicator. We don't support outgoing media, multiple accounts, pairing, slash commands, or the quote store.
-- **`bot_agent`:** set to `DearByte/…`. `iLink-App-Id` and `channel_version` still mirror the protocol version we implement.
-- **Who gets replies:** only the user who scanned the QR code (`ilink_user_id`). Upstream uses a configurable allow list.
-- **Bursts:** several quick messages are merged into one turn. Upstream answers each one.

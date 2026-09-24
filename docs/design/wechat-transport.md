@@ -1,61 +1,54 @@
-# WeChat transport: iLink (official) vs. desktop automation
+# WeChat transport: desktop automation of a real 小拜 account
 
-**Decision (2026-09-24): build the demo on iLink, Tencent's official personal-account bot API. Keep desktop Accessibility automation as a fallback only.**
+**Decision (2026-09-24, revised the same day): 小拜 is a real WeChat account with its own name and avatar. WeChat for Mac, logged in as 小拜, is driven through macOS Accessibility.** The iLink client was built and then removed (its last version is in commit `fe352fd`).
 
-This reverses the original Codex proposal (replaced by [the plan](../plan.md)), which dropped iLink because it "does not attach to the current desktop chat". The demo doesn't need that: it only needs a WeChat chat on the phone.
+## Why not iLink (微信 ClawBot)
 
-## What iLink is
+iLink is Tencent's official personal-account bot API, and technically the better transport: official terms, real message IDs, real photo bytes. But the bot always appears as **「微信 ClawBot」 with the default avatar**. No API renames it or changes its avatar; a remark (备注) changes only what the viewer's own phone shows. The video needs 小拜 to look like a real friend in the chat list, so we went back to the test account created for this.
 
-- Tencent released it on 2026-03-22 as the transport behind the **微信 ClawBot** plugin, covered by 《微信 ClawBot 功能使用条款》. The official client is [`@tencent-weixin/openclaw-weixin`](https://github.com/Tencent/openclaw-weixin) (MIT).
-- **Setup:** you scan a QR code with WeChat and get a `bot_token`. The bot then appears in *your own* WeChat as a contact.
-- **API:** plain HTTP/JSON at `ilinkai.weixin.qq.com`:
-  - `getupdates`: long-poll for new messages
-  - `sendmessage`: reply
-  - `sendtyping`: show "typing"
-  - `getuploadurl`: CDN upload for outgoing media
-- **Media:** text, image, voice, file and video, in both directions. Media sits on a CDN, encrypted with AES-128-ECB; the client decrypts it.
-- **Replies only:** every reply carries the `context_token` from an incoming message. The bot cannot start a conversation.
-
-## Comparison for this project
-
-| | iLink | Desktop Accessibility |
+| | Desktop (chosen) | iLink (removed) |
 |---|---|---|
-| Tencent's position | Official, with published terms | Unauthorised automation; account risk; Tencent has sued makers of automation tools |
-| Photos | **Real image bytes** (decrypted from the CDN) | Not exposed; would need copy-image or screen capture |
-| Message identity | Real message IDs and a cursor | Invented from the UI; fragile |
-| Sending | API call with a clear result | UI scripting with focus and composer races |
-| Accounts needed | **Just yours.** The bot is a contact in your account. | A second test account plus a Mac left logged in |
-| Runs on | Anything that can make HTTPS calls | Only the Mac with WeChat open |
-| Sellable later | Plausible; see open questions | No |
-| On camera | Contact is called "微信 ClawBot" with the default avatar | Looks like a normal friend |
-| Proactive messages | No | Yes (not in scope anyway) |
+| On camera | **Its own name and avatar**, like any friend | 「微信 ClawBot」, default avatar |
+| Tencent's position | Unauthorised automation; account risk | Official, with published terms |
+| Accounts needed | A second account (小拜) plus a Mac left logged in | Just yours |
+| Photos | Unencrypted JPEGs in WeChat's local folder (3.8.4 only) | Downloaded and decrypted from the CDN |
+| Message identity | Inferred from the UI's rows | Real IDs and a cursor |
+| Sellable | No | Maybe; the terms suggest personal use only |
 
-The on-camera difference is the only real cost. There's no API to rename the bot or change its avatar. You can set a **remark (备注)** such as "小拜" on your phone, which changes the chat title you see; the avatar stays the default.
+## How it works
 
-## Implementation (2026-09-24)
+`native/wechat-desktop/main.swift` is a small helper that talks JSON lines over stdin/stdout. `src/channels/desktop/` polls it every second.
 
-`src/channels/ilink/` is our own client, written without OpenClaw; `npm run dearbyte` runs it. Why we skip OpenClaw: the official client runs only as an OpenClaw plugin. It imports OpenClaw's plugin SDK in 12 files, and OpenClaw would then run the conversation. Using it would mean installing a general-purpose agent with shell and file access, and rewriting our persona, memory and safety pipeline for that agent.
+- **Finding the window:** `kAXMainWindowAttribute` of `com.tencent.xinWeChat`. This works while WeChat is on another Space, where `AXWindows` is empty.
+- **Reading:** the messages are an `AXTable` described as "Messages"; each row's cell children carry an `AXTitle`.
+- **Sending:** the composer is an `AXTextArea` titled with the chat name. The helper checks the bound chat is open and the composer is empty, sets `AXValue`, checks again, then posts Return with `CGEvent.postToPid`. That works without bringing WeChat to the front. It then waits up to 6 s for a new `MeSaid:<text>` row.
+  - Failures before Return (wrong chat, someone's draft) are retried a few times.
+  - A bubble that isn't confirmed is reported and **never resent**, so nothing is sent twice.
+- **New messages:** each snapshot is compared with the previous one. The alignment tolerates rows dropping off the top and a row changing in place while it loads; if the two don't line up at all, the runner resyncs and may miss a message. The first snapshot is only a baseline.
+- **Photos:** WeChat 3.8.4 saves each received image as `…/<account>/Message/MessageTemp/<chat>/Image/<id>_.pic.jpg` (plus `_.pic_thumb.jpg`). When a photo row appears, the runner claims the oldest new full-size file in the configured folder, waiting up to 15 s. Only that one folder is read.
 
-What the reference code settled:
-- **Multi-bubble replies:** the plugin sends several messages with the same `context_token` for one reply, so bubbles go out as separate messages.
-- **Voice:** voice messages carry WeChat's own transcript (`voice_item.text`).
+## What we observed (WeChat 3.8.4, English UI)
 
-Not verified yet: a real login, how long a `context_token` stays valid, and rate limits.
+Row titles:
 
-## Open questions to confirm when connecting
+| Row | Meaning |
+|---|---|
+| `AlexSaid:在吗` | Text from the contact. The name is the contact's **nickname**, not the chat title (which here is the remark 「张三」). |
+| `Alex:Sent aPhoto` | Photo from the contact |
+| `MeSaid:…` | Sent by 小拜 |
+| `01:34`, `Yesterday 23:51` | Time labels |
 
-1. **Multi-bubble replies:** the official client reuses one `context_token` for several sends, so this should work. Confirm it live, and check how long the token stays valid.
-2. **Rate and frequency limits:** the terms let Tencent limit "信息收发规模或频率". Measure what normal use looks like.
-3. **Calling the protocol directly:** the official package is an OpenClaw plugin. Calling the same endpoints directly (as the plugin does, and as several community projects do) is not documented as a supported standalone use.
-4. **Commercial or multi-user use:** community write-ups describe it as for personal use and "不适用于商业客服". Read the full terms before building anything to sell.
-5. **Data responsibility:** under the terms, Tencent only relays messages. We, as the third-party AI service, process the user's content and are responsible for it, which matters under PIPL (China's personal-information law).
+- Repeated identical messages appear as separate rows.
+- The received photo checked was a 1280×1707 JPEG, unencrypted.
+- Live test on 2026-09-24:
+  - Text reply: 1.2 s of model time, about $0.0001.
+  - A photo with a caption merged into one turn and was described correctly: 3.6 s, about $0.0008, 4 bubbles.
+  - The first run missed messages because rows were matched on the chat title; that is fixed and covered by tests.
 
-## Sources
+## Limits and risks
 
-- [Tencent/openclaw-weixin](https://github.com/Tencent/openclaw-weixin)
-- [iLink protocol walkthrough (x1ah/wechat-ilink-demo)](https://github.com/x1ah/wechat-ilink-demo)
-- [What is iLink (allclaw.org)](https://allclaw.org/blog/what-is-ilink)
-- [WeChat developer community: renaming the ClawBot](https://developers.weixin.qq.com/community/develop/doc/0004489fe006c0c47725b0ef06b800)
-- [Tencent Cloud developer article on the ClawBot terms](https://cloud.tencent.com/developer/article/2646635)
-- [Qiniu: what ClawBot can and cannot do](https://news.qiniu.com/archives/1774342011600)
-- [SCMP launch coverage](https://www.scmp.com/tech/article/3347590/tencent-adds-clawbot-plug-wechat-amid-openclaw-boom-and-privacy-warnings)
+- **Account risk:** Tencent doesn't authorise automation. Use only the test account. Keep the volume human: one chat, replies only.
+- **Version lock:** stay on WeChat for Mac 3.8.4 with the English UI. The row format was only observed in English, and 4.x encrypts image files.
+- **The Mac must stay awake** with the chat open, scrolled to the bottom. Scrolling up or switching chats pauses replies until it's back.
+- **One-to-one only:** any sender who isn't "Me" is treated as the user. Group chats would need the sender kept.
+- **Not a product:** this route can't be sold. Selling would need a different transport (see the plan).

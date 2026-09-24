@@ -2,6 +2,7 @@
 
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
+import type { ReplyEvent } from "./channels/reply-loop.ts";
 import type { CompanionEvent } from "./companion/companion.ts";
 import { localDate } from "./companion/time.ts";
 import { ROOT } from "./config.ts";
@@ -43,6 +44,22 @@ export function describeEvent(e: CompanionEvent): string | null {
     }
     case "memory_error":
       return `记忆整理失败（不影响回复）：${e.message}`;
+  }
+}
+
+/** Log line for a WeChat reply-loop event (null when there's nothing to show). */
+export function describeReplyEvent(e: ReplyEvent): string | null {
+  switch (e.type) {
+    case "inbound":
+      return `微信 › ${e.text || "（无文字）"}${e.image ? " [图片]" : ""}${e.merged > 1 ? dim(`（${e.merged} 条合并为一轮）`) : ""}`;
+    case "sent":
+      return `小拜 › ${e.bubble}`;
+    case "drafted":
+      return `小拜（草稿，未发送）› ${e.bubble}`;
+    case "turn":
+      return null;
+    case "error":
+      return `出错：${e.message}`;
   }
 }
 
