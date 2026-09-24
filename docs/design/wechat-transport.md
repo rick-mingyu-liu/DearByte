@@ -2,7 +2,7 @@
 
 **Decision (2026-09-24): build the demo on iLink, Tencent's official personal-account bot API. Keep desktop Accessibility automation as a fallback only.**
 
-This reverses the original plan's choice. The plan dropped iLink because it "does not attach to the current desktop chat". The demo doesn't need that: it only needs a WeChat chat on the phone.
+This reverses the original Codex proposal (replaced by [the plan](../plan.md)), which dropped iLink because it "does not attach to the current desktop chat". The demo doesn't need that: it only needs a WeChat chat on the phone.
 
 ## What iLink is
 

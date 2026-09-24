@@ -2,7 +2,7 @@
 
 A Chinese-speaking AI companion, 小拜 (嘴贫但细心), with persistent memory. It's built for a Douyin demo in which you chat with it in WeChat.
 
-**Status:**
+**Status** ([full plan](docs/plan.md)):
 - The companion works in a terminal simulator.
 - A WeChat connection is written and unit-tested, but hasn't been tried against real WeChat yet. It uses iLink, the official API behind 微信 ClawBot, and doesn't need OpenClaw. See [the transport notes](docs/design/wechat-transport.md).
 
@@ -109,8 +109,9 @@ src/memory/extract.ts    fact extraction and validation
 src/storage/store.ts     SQLite (node:sqlite): messages, facts, settings
 src/model/               DeepSeek client and fake model
 tools/bakeoff.ts         persona bake-off
-tools/inspect-wechat.swift  read-only WeChat accessibility probe
-docs/                    original plan, provenance, design notes
+tools/inspect-wechat.swift  read-only WeChat accessibility probe (desktop fallback only)
+docs/plan.md             plan: decisions, status, milestones
+docs/                    provenance, design notes, third-party notices
 ```
 
 ## Data and privacy
