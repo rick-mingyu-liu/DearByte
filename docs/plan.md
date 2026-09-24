@@ -4,7 +4,7 @@
 
 ## What we're building
 
-小拜 is a Chinese-speaking AI companion (嘴贫但细心) with **its own WeChat account, name and avatar**. You chat with it from your phone like any friend, with a terminal beside it showing what happens on each turn. The first goal is a Douyin video for 「原来人真的会爱上代码」:
+小拜 is a Chinese-speaking AI companion (傲娇但细心, a tsundere girl) with **its own WeChat account, name and avatar**. You chat with it from your phone like any friend, with a terminal beside it showing what happens on each turn. The first goal is a Douyin video for 「原来人真的会爱上代码」:
 
 1. A phone sends a photo of a cat with 「刚刚回来路上看见的，你看看这是什么」.
 2. 小拜 answers in 2–4 short bubbles grounded in the photo.

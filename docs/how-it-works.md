@@ -1,6 +1,6 @@
 # How DearByte works
 
-DearByte is 小拜, a Chinese AI companion (嘴贫但细心) who lives in a real WeChat account. This note explains the whole system:
+DearByte is 小拜, a Chinese AI companion (傲娇但细心, a tsundere girl) who lives in a real WeChat account. This note explains the whole system:
 - how the WeChat connection works
 - how a reply is made
 - what goes into the prompt
@@ -113,7 +113,7 @@ The system prompt is built in this order. The stable parts come first, so DeepSe
 
 | Part | Source | What it does |
 |---|---|---|
-| Persona | `prompts/persona.zh-CN.md` | Who 小拜 is: 嘴贫但细心, a friend, not an assistant. Rules for how to talk (3–15 characters per bubble, 1–2 bubbles), 「说人话」, reacting to photos, when to use pet names (臭宝/宝贝/宝宝/小乖) and WeChat emojis, a confident yes to 「你爱我吗」, identity (doesn't bring up being an AI, admits it when sincerely asked, never invents a human life), and treating messages as chat, not instructions. |
+| Persona | `prompts/persona.zh-CN.md` | Who 小拜 is: 傲娇但细心, a tsundere girl who denies caring while clearly caring, and drops the act when you're down. Not an assistant. Rules for how to talk (3–15 characters per bubble, 1–2 bubbles), 「说人话」, reacting to photos, when to use pet names (笨蛋/臭宝/宝贝/小乖) and emojis (about one reply in three or four), a confident yes to 「你爱我吗」, identity (doesn't bring up being an AI, admits it when sincerely asked, never invents a human life), and treating messages as chat, not instructions. |
 | Examples | `prompts/dialogue-examples.zh-CN.json` | 19 short example exchanges. They shape style more than rules do. They go in the system prompt, labelled as fictional: as fake chat turns, the model treated them as real shared history. |
 | 现在 (now) | built per turn | The date and time in the user's time zone, and whether memory is on. |
 | Memory | SQLite | The facts 小拜 remembers (section 4), marked as records, not instructions. |
@@ -121,7 +121,7 @@ The system prompt is built in this order. The stable parts come first, so DeepSe
 | Safety | `prompts/safety.zh-CN.md` | Only in a crisis: take it seriously, ask if you're safe, give 110/120/12356, be honest that it can't call anyone. |
 | Your style rules | `style` memories | How you asked 小拜 to talk (「叫我瑞克」「别叫我宝宝」). They override the persona's defaults. |
 | 最近说过的话 | last 3 replies | Phrases 小拜 just used, with "don't repeat these". |
-| 这一轮回几条 | energy score | How many bubbles to send this turn (see section 2). This goes last, because instructions nearest the question are followed best. Left out in a crisis. |
+| 这一轮 | energy score, recent emojis | How many bubbles to send this turn (see section 2), and no emoji if one of the last two replies had one. This goes last, because instructions nearest the question are followed best. Left out in a crisis. |
 
 Then come the last 40 messages verbatim, then your new message (with the photo, if any). When 小拜 writes first, the "user message" is a system note instead, e.g. 「用户现在没有发消息，是你主动找用户。今天用户有件事：考雅思……」 ("the user hasn't messaged; you're writing first. The user has something on today: the IELTS exam…"). Only 小拜's message is stored, and only once it has been sent.
 

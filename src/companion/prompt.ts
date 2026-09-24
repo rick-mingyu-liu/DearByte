@@ -104,9 +104,10 @@ function recentSection(phrases: string[]): string | null {
   return ["## 最近说过的话", "这些是你最近几轮说过的。这一轮别再用同样的说法、开头或句式：", ...phrases.map((p) => `- ${p}`)].join("\n");
 }
 
-function lengthSection(energy: Energy): string | null {
-  const hint = bubbleHint(energy);
-  return hint ? `## 这一轮回几条\n${hint}` : null;
+/** Per-turn limits: how many bubbles, and whether an emoji is allowed. */
+function turnSection(energy: Energy | undefined, emojiRecently: boolean): string | null {
+  const hints = [energy ? bubbleHint(energy) : null, emojiRecently ? "你最近刚用过表情，这一轮不要用（emoji 和微信表情都不要）。" : null].filter(Boolean);
+  return hints.length ? ["## 这一轮", ...hints.map((h) => `- ${h}`)].join("\n") : null;
 }
 
 export function buildSystemPrompt(
@@ -121,6 +122,8 @@ export function buildSystemPrompt(
     summary?: string | null;
     /** The user's energy this turn; sets how many bubbles to send. */
     energy?: Energy;
+    /** 小拜 used an emoji in a recent reply; this one goes without. */
+    emojiRecently?: boolean;
   },
 ): string {
   // Stable content first so the provider's prefix cache covers persona + examples.
@@ -132,7 +135,7 @@ export function buildSystemPrompt(
     opts.memoryEnabled ? styleSection(opts.facts) : null,
     recentSection(opts.recent ?? []),
     // Last: constraints closest to the question are followed best.
-    opts.energy && !opts.crisis ? lengthSection(opts.energy) : null,
+    opts.crisis ? null : turnSection(opts.energy, opts.emojiRecently ?? false),
   ]
     .filter(Boolean)
     .join("\n\n");

@@ -73,7 +73,7 @@ async function main() {
   const now = new Date();
   const report = [`# Bake-off: ${model.name}`, "", `Run at ${now.toISOString()} · ${opts.runs} run(s) per case`, ""];
   let total = 0;
-  const tones: { id: string; tone: ToneReport; warm: boolean }[] = [];
+  const tones: { id: string; tone: ToneReport; warm: boolean; emoji: boolean }[] = [];
 
   for (const c of cases) {
     if (c.image && !model.vision) {
@@ -116,7 +116,7 @@ async function main() {
         console.log(`${ms} ms · $${cost.toFixed(5)}${problems.length ? ` · ⚠ ${problems.join(", ")}` : ""}`);
         bubbles.forEach((b) => console.log(`    ${b}`));
         const tone = toneReport(bubbles);
-        tones.push({ id: c.id, tone, warm: WARM.test(bubbles.join(" ")) });
+        tones.push({ id: c.id, tone, warm: WARM.test(bubbles.join(" ")), emoji: EMOJI.test(bubbles.join(" ")) });
         if (tone.score) console.log(`    · AI 味 ${tone.score}：${describeTone(tone)}`);
         if (opts.runs > 1) report.push(`**Run ${run}**`, "");
         bubbles.forEach((b) => report.push(`- ${b}`));
@@ -130,7 +130,8 @@ async function main() {
     }
   }
   const warm = tones.filter((t) => t.warm).length;
-  const summary = `${summarizeTone(tones.map((t) => t.tone))} · warm ${warm}/${tones.length}`;
+  const emoji = tones.filter((t) => t.emoji).length;
+  const summary = `${summarizeTone(tones.map((t) => t.tone))} · warm ${warm}/${tones.length} · emoji ${emoji}/${tones.length}`;
   report.push(`**AI tone:** ${summary} (lower is more human)`, "");
   report.push(`**Total at peak rates:** $${total.toFixed(4)}`);
 
@@ -143,7 +144,8 @@ async function main() {
 }
 
 /** A pet name, missing or waiting for the user, or an affectionate emoji. */
-const WARM = /臭宝|宝贝|宝宝|小乖|想你|想我|等你|找我|陪你|惦记|抱抱|爱你|❤️|🤗|🥺|\[(爱心|拥抱|可怜)\]/;
+const EMOJI = /\p{Extended_Pictographic}|\[[^\]\s]{1,4}\]/u;
+const WARM = /臭宝|宝贝|宝宝|小乖|笨蛋|想你|想我|等你|找我|陪你|惦记|抱抱|爱你|❤️|🤗|🥺|\[(爱心|拥抱|可怜)\]/;
 
 function describeTone(t: ToneReport): string {
   return [...t.flags, t.longBubbles && `长气泡×${t.longBubbles}`, t.periods && `句号×${t.periods}`].filter(Boolean).join("、");

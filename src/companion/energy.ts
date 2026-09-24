@@ -26,3 +26,16 @@ export function bubbleHint(energy: Energy): string | null {
       return null;
   }
 }
+
+/** A Unicode emoji or a WeChat emoji code such as [捂脸]. */
+const EMOJI = /\p{Extended_Pictographic}|\[[^\]\s]{1,4}\]/u;
+/** After an emoji, this many of 小拜's replies go without one. */
+const EMOJI_COOLDOWN = 2;
+
+/** Whether one of 小拜's last replies had an emoji, so this one shouldn't. */
+export function emojiRecently(history: { role: string; text: string }[]): boolean {
+  return history
+    .filter((m) => m.role === "assistant")
+    .slice(-EMOJI_COOLDOWN)
+    .some((m) => EMOJI.test(m.text));
+}

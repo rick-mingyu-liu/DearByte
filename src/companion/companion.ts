@@ -6,7 +6,7 @@ import type { Store } from "../storage/store.ts";
 import { FALLBACK_REPLY, parseReply, type Reply } from "./output.ts";
 import { buildMessages, buildSystemPrompt, factsForPrompt, recentPhrases, type PromptParts } from "./prompt.ts";
 import { modelSeesCrisis } from "./crisis-check.ts";
-import { userEnergy } from "./energy.ts";
+import { emojiRecently, userEnergy } from "./energy.ts";
 import { looksLikeCrisis } from "./safety.ts";
 import { localDate } from "./time.ts";
 
@@ -90,7 +90,7 @@ export class Companion {
     const summary = memoryEnabled ? store.getSetting(SUMMARY_SETTING) : null;
     const energy = userEnergy({ text: input.text, image: Boolean(input.image) });
     const prompt = (crisis: boolean) =>
-      buildMessages(buildSystemPrompt(parts, { now, timeZone, memoryEnabled, facts, crisis, recent: recentPhrases(history), summary, energy }), history, input);
+      buildMessages(buildSystemPrompt(parts, { now, timeZone, memoryEnabled, facts, crisis, recent: recentPhrases(history), summary, energy, emojiRecently: emojiRecently(history) }), history, input);
     let reply = await this.generate(prompt(crisis));
     if (check && (await check)) {
       crisis = true;
@@ -159,7 +159,7 @@ export class Companion {
     const memoryEnabled = store.memoryEnabled();
     const facts = memoryEnabled ? factsForPrompt(store.activeFacts(), localDate(now, timeZone)) : [];
     const summary = memoryEnabled ? store.getSetting(SUMMARY_SETTING) : null;
-    const system = buildSystemPrompt(parts, { now, timeZone, memoryEnabled, facts, crisis: false, recent: recentPhrases(history), summary });
+    const system = buildSystemPrompt(parts, { now, timeZone, memoryEnabled, facts, crisis: false, recent: recentPhrases(history), summary, emojiRecently: emojiRecently(history) });
     const text =
       `（系统提示，不是用户说的）用户现在没有发消息，是你主动找用户。${note}\n` +
       "像朋友随手发的微信那样开个头：1 条，最多 2 条，每条很短。不要说“提醒你”“我记得你说过”“根据记录”，不要用“在吗”开头。";

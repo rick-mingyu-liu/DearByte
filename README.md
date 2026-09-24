@@ -1,6 +1,6 @@
 # DearByte
 
-A Chinese-speaking AI companion, 小拜 (嘴贫但细心), with persistent memory. It's built for a Douyin demo in which you chat with it in WeChat.
+A Chinese-speaking AI companion, 小拜 (傲娇但细心, a tsundere girl), with persistent memory. It's built for a Douyin demo in which you chat with it in WeChat.
 
 **Status** ([full plan](docs/plan.md)):
 - The companion works in a terminal simulator.
