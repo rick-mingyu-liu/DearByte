@@ -79,3 +79,12 @@ In general, sending stickers means bringing WeChat to the front for a moment: ac
 **Emojis:** Unicode emojis are plain text and work. WeChat's own codes such as `[捂脸]` are sent as text from the English UI and render as pictures on the phone (confirmed 2026-09-24).
 
 **Decision (2026-09-24): emojis only for now.** Stickers can't be sent in the background on a Mac someone is using. If they're wanted later, WeChat needs a screen of its own where it can stay in front: a spare Mac, or a macOS VM (UTM/Tart; WeChat 3.8.4 in a VM is untested).
+
+## Typing status (probed 2026-09-24)
+
+The phone shows 「对方正在输入…」 ("the other party is typing…") while a friend types. We tested whether 小拜 can show it while the model is writing. The test never pressed Return. The operator watched the chat on the phone:
+
+- **Filling the message box directly** (the way sending works), holding the text for 10 s: nothing on the phone.
+- **Real key events, one character every 0.7 s**, to WeChat in the background: the text arrived in the box, but nothing showed on the phone.
+
+WeChat for Mac 3.8.4 doesn't send typing status from the background, at least. It might from the foreground, but 小拜 has to work in the background, so we stopped there. (iLink has a typing call, but that route was dropped for the name and avatar.) The human feel comes from the reading and typing pauses between bubbles instead.
