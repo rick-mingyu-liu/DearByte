@@ -34,7 +34,7 @@ DearByte 目前是一个可以在终端运行、也可以实验性接入微信�
 
 ## 快速开始
 
-需要 **Node.js 24+**。先在终端认识小拜：
+需要 **Node.js 24+**（推荐 26，项目里的 `.nvmrc` 写的就是 26）。先在终端认识小拜：
 
 ```bash
 git clone https://github.com/rick-mingyu-liu/DearByte.git

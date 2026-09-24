@@ -34,7 +34,7 @@ If this sounds like your kind of companion, leave a ⭐ Star and follow Xiaobai'
 
 ## Quick start
 
-Requires **Node.js 24+**. Meet Xiaobai in your terminal first:
+Requires **Node.js 24+** (26 recommended; the repo's `.nvmrc` says 26). Meet Xiaobai in your terminal first:
 
 ```bash
 git clone https://github.com/rick-mingyu-liu/DearByte.git
