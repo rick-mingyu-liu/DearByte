@@ -119,3 +119,13 @@ test("thinks of the user some afternoons, after a few quiet hours", () => {
   expect(plan(at("15:30"), { state: state({ thinkingAt: 900, sent: ["thinking"] }), history: morning })).toBeNull();
   expect(plan(at("15:30"), { state: state(), history: morning })).toBeNull(); // not today
 });
+
+test("after the user asks for space, 小拜 doesn't write first for three days", () => {
+  const old = [msg("user", at("10:00", "2026-09-22"), "我想自己待一会儿，别给我发消息了"), msg("assistant", at("10:00", "2026-09-22"))];
+  expect(plan(at("14:00"), { history: old })).toBeNull(); // would otherwise be a check-in
+  expect(plan(at("14:00", "2026-09-25"), { history: old })?.key).toBe("checkin");
+  for (const text of ["让我静静", "别烦我了", "今天不想聊", "别理我"]) {
+    expect(plan(at("14:00"), { history: [msg("user", at("10:00", "2026-09-22"), text)] })).toBeNull();
+  }
+  expect(plan(at("14:00"), { history: [msg("user", at("10:00", "2026-09-22"), "别忘了明天考试")] })?.key).toBe("checkin");
+});

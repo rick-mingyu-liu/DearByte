@@ -29,6 +29,11 @@ export const MAX_PER_DAY = 2;
 export const QUIET_AFTER_CHAT_MS = 90 * 60_000;
 /** Check in after this long without hearing from the user. */
 export const CHECKIN_AFTER_MS = 20 * 3_600_000;
+/** After the user asks for space, 小拜 doesn't write first for this long. */
+export const SPACE_MS = 3 * 86_400_000;
+/** 「别给我发消息了」「让我静静」「别烦我」… */
+const WANTS_SPACE = /别(再)?(给我)?(发|找|烦|吵|理)|不想(聊|说话|理)|让我(静静|静一静|一个人)|自己待|别来(找|烦)|烦死了你/;
+
 /** Chance of a good morning on a given day, so it isn't a daily ritual. */
 const MORNING_CHANCE = 0.6;
 /** Chance of a "thinking of you" message on a given day. */
@@ -62,6 +67,11 @@ export function planProactive(ctx: {
   // Never double-text: the last nudge must have been answered.
   if (state.lastAt && lastUser.createdAt <= state.lastAt) return null;
   if (now.getTime() - Date.parse(lastAny.createdAt) < QUIET_AFTER_CHAT_MS) return null;
+  // Asked for space recently: only reply, never start.
+  const wantsSpace = ctx.history.some(
+    (m) => m.role === "user" && now.getTime() - Date.parse(m.createdAt) < SPACE_MS && WANTS_SPACE.test(m.text),
+  );
+  if (wantsSpace) return null;
 
   const today = localDate(now, timeZone);
   const fresh = (key: string) => !state.sent.includes(key);
