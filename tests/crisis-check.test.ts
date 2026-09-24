@@ -7,7 +7,7 @@ import { FakeModel } from "../src/model/fake.ts";
 import { Store } from "../src/storage/store.ts";
 
 const isCheck = (m: ChatMessage[]) => String(m[0].content).includes("人身安全风险");
-const isSafetyPrompt = (m: ChatMessage[]) => String(m[0].content).includes("安全模式");
+const isSafetyPrompt = (m: ChatMessage[]) => String(m[0].content).includes("# 安全模式（仅在检测到危机信号时插入）");
 
 function setup(risk: boolean | "junk") {
   const store = Store.open(":memory:");
