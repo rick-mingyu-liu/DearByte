@@ -35,7 +35,6 @@ export type Outlet<M extends Incoming<unknown>> = {
   loadImage(ref: NonNullable<M["image"]>): Promise<Uint8Array>;
   /** Sends one bubble; the outlet handles its own retries. `message` is null when 小拜 writes first. */
   sendBubble(message: M | null, bubble: string): Promise<SendResult>;
-  typing?(message: M, on: boolean): Promise<void>;
 };
 
 /**
@@ -142,7 +141,7 @@ export class ReplyLoop<M extends Incoming<unknown>> {
         }
         if (interrupted()) return "dropped";
         this.emit({ type: "initiated", reason });
-        const sent = await this.sendAll(null, draft.bubbles, undefined, interrupted);
+        const sent = await this.sendAll(null, draft.bubbles, interrupted);
         draft.commit(sent);
         return sent.length ? "sent" : "failed";
       } finally {
@@ -158,9 +157,6 @@ export class ReplyLoop<M extends Incoming<unknown>> {
     const { companion, outlet } = this.deps;
     const started = (this.deps.now ?? Date.now)();
     this.emit({ type: "inbound", text: message.text, image: message.image !== null, merged });
-    const typing = (on: boolean) => outlet.typing?.(message, on).catch(() => {}) ?? Promise.resolve();
-    await typing(true);
-
     let text = message.text;
     let image: ImageInput | undefined;
     if (message.image !== null) {
@@ -185,19 +181,17 @@ export class ReplyLoop<M extends Incoming<unknown>> {
 
     const wait = readDelay(this.random()) - ((this.deps.now ?? Date.now)() - started);
     if (wait > 0) await this.sleep(wait);
-    await this.sendAll(message, bubbles, () => typing(true));
-    await typing(false);
+    await this.sendAll(message, bubbles);
   }
 
   /**
-   * Sends bubbles in order with a typing pause before each after the first.
+   * Sends bubbles in order, pausing before each after the first as if typing it.
    * Stops at a failure, or before a bubble once `stop` is true. Returns what was sent.
    */
-  private async sendAll(message: M | null, bubbles: string[], typing?: () => Promise<void>, stop?: () => boolean): Promise<string[]> {
+  private async sendAll(message: M | null, bubbles: string[], stop?: () => boolean): Promise<string[]> {
     const sent: string[] = [];
     for (const [i, bubble] of bubbles.entries()) {
       if (i > 0) {
-        await typing?.();
         await this.sleep(bubbleDelay(bubble, this.random()));
         if (stop?.()) break;
       }
