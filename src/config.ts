@@ -9,6 +9,8 @@ export type Config = {
   dbPath: string;
   timeZone: string;
   historyMessages: number;
+  /** WeChat (iLink) login: bot token and the allowed user. */
+  wechatAccountPath: string;
 };
 
 // Minimal .env reader: KEY=value lines, optional quotes. Real env vars win.
@@ -30,5 +32,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     dbPath: merged.COMPANION_DB || join(ROOT, "data/companion.sqlite"),
     timeZone: merged.COMPANION_TZ || "Asia/Shanghai",
     historyMessages: Number(merged.COMPANION_HISTORY_MESSAGES || 40),
+    wechatAccountPath: merged.COMPANION_WECHAT_ACCOUNT || join(ROOT, "data/wechat-account.json"),
   };
 }

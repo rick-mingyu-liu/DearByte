@@ -32,9 +32,19 @@ This reverses the original plan's choice. The plan dropped iLink because it "doe
 
 The on-camera difference is the only real cost. There's no API to rename the bot or change its avatar. You can set a **remark (备注)** such as "小拜" on your phone, which changes the chat title you see; the avatar stays the default.
 
+## Implementation (2026-09-24)
+
+`src/channels/ilink/` is our own client, written without OpenClaw; `npm run dearbyte` runs it. Why we skip OpenClaw: the official client runs only as an OpenClaw plugin. It imports OpenClaw's plugin SDK in 12 files, and OpenClaw would then run the conversation. Using it would mean installing a general-purpose agent with shell and file access, and rewriting our persona, memory and safety pipeline for that agent.
+
+What the reference code settled:
+- **Multi-bubble replies:** the plugin sends several messages with the same `context_token` for one reply, so bubbles go out as separate messages.
+- **Voice:** voice messages carry WeChat's own transcript (`voice_item.text`).
+
+Not verified yet: a real login, how long a `context_token` stays valid, and rate limits.
+
 ## Open questions to confirm when connecting
 
-1. **Multi-bubble replies:** can one incoming message's `context_token` be used for 2–4 `sendmessage` calls, and for how long? This decides whether bubbles go out as separate messages or have to be joined into one.
+1. **Multi-bubble replies:** the official client reuses one `context_token` for several sends, so this should work. Confirm it live, and check how long the token stays valid.
 2. **Rate and frequency limits:** the terms let Tencent limit "信息收发规模或频率". Measure what normal use looks like.
 3. **Calling the protocol directly:** the official package is an OpenClaw plugin. Calling the same endpoints directly (as the plugin does, and as several community projects do) is not documented as a supported standalone use.
 4. **Commercial or multi-user use:** community write-ups describe it as for personal use and "不适用于商业客服". Read the full terms before building anything to sell.
