@@ -33,6 +33,8 @@ export function describeEvent(e: CompanionEvent): string | null {
     }
     case "reply_invalid":
       return `回复格式不合规（${e.problems.join("；")}）→ ${{ repair: "重试一次", salvage: "截断使用", fallback: "使用兜底回复" }[e.action]}`;
+    case "reply_trimmed":
+      return `超过 2 条，删掉了：${e.dropped.join(" / ")}`;
     case "memory": {
       const changed = e.outcome.results.filter((r) => r.result === "inserted" || r.result === "updated");
       const parts = [

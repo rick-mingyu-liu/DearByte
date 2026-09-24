@@ -112,3 +112,11 @@ test("extraction failure is reported but the reply still arrives", async () => {
   expect(await turn.memory).toBeNull();
   expect(events).toContainEqual({ type: "memory_error", message: "network down" });
 });
+
+test("chat replies are cut to two bubbles; crisis replies keep all of theirs", async () => {
+  const bubbles = JSON.stringify({ bubbles: ["一", "二", "三"] });
+  const { companion, events } = setup([bubbles, bubbles]);
+  expect((await companion.handle({ text: "你爱我吗" })).reply.bubbles).toEqual(["一", "二"]);
+  expect(events).toContainEqual({ type: "reply_trimmed", dropped: ["三"] });
+  expect((await companion.handle({ text: "我不想活了" })).reply.bubbles).toHaveLength(3);
+});

@@ -7,10 +7,14 @@ import { buildMessages, buildSystemPrompt, factsForPrompt, recentPhrases, type P
 import { looksLikeCrisis } from "./safety.ts";
 import { localDate } from "./time.ts";
 
+/** Bubbles per reply outside a crisis. */
+export const CHAT_MAX_BUBBLES = 2;
+
 export type CompanionEvent =
   | { type: "context"; historyMessages: number; facts: number; memoryEnabled: boolean; crisis: boolean; image: boolean }
   | { type: "model"; purpose: "reply" | "repair" | "memory"; ms: number; promptTokens: number; cacheHitTokens: number; completionTokens: number; cost: number | null }
   | { type: "reply_invalid"; problems: string[]; action: "repair" | "salvage" | "fallback" }
+  | { type: "reply_trimmed"; dropped: string[] }
   | { type: "memory"; outcome: ExtractionOutcome }
   | { type: "memory_error"; message: string };
 
@@ -61,7 +65,13 @@ export class Companion {
 
     const system = buildSystemPrompt(parts, { now, timeZone, memoryEnabled, facts, crisis, recent: recentPhrases(history) });
     const messages = buildMessages(system, history, input);
-    const reply = await this.generate(messages);
+    let reply = await this.generate(messages);
+    // A third bubble reads as an AI over-explaining. Crisis replies keep all of
+    // theirs: the safety prompt needs room for the hotline numbers.
+    if (!crisis && reply.bubbles.length > CHAT_MAX_BUBBLES) {
+      this.emit({ type: "reply_trimmed", dropped: reply.bubbles.slice(CHAT_MAX_BUBBLES) });
+      reply = { bubbles: reply.bubbles.slice(0, CHAT_MAX_BUBBLES) };
+    }
 
     const assistantMessage = store.addMessage("assistant", reply.bubbles.join("\n"), {
       bubbles: reply.bubbles,

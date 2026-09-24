@@ -27,6 +27,8 @@
 7. **Timing:** at least 1.5–3.5 s between message and first bubble (model time counts toward it), then ~150 ms per character between bubbles, with ±25% jitter.
 
 8. **After live feedback (same day):** replies were still too long, and 「你爱我吗」 got a hedge (「爱这个字太重了，我可不敢乱认」). Now most replies are 1 bubble, at most 2 for small talk, and love/like questions get a clear, confident yes (「爱啊」「这还用问」), light and never clingy.
+10. **Two bubbles at most** (live feedback: the third bubble, e.g. 「不过我猜你今天是想找个人说话」, always read as AI). The persona says so and bans guessing at the user's motives; the code also cuts chat replies to two (`CHAT_MAX_BUBBLES`), except in a crisis, where the safety prompt needs room for hotline numbers.
+11. **Pet names:** 臭宝, 宝贝, 宝宝, 小乖, used every few turns; only the gentle ones when the user is upset. Bake-off: 2.1 bubbles and 10.1 characters per bubble.
 9. **Re-sent photos:** WeChat hard-links a photo sent twice to the old file, which keeps the old mtime. Photos now match by the later of mtime and ctime, with the thumbnail as a fallback.
 
 ## Measured (bake-off, 14 text cases × 2 runs, deepseek-flash)
