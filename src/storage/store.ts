@@ -115,7 +115,8 @@ export class Store {
     const db = new DatabaseSync(path);
     // node:sqlite turns foreign keys on by default; the migration needs them off,
     // or dropping the old table would null every fact's source link.
-    db.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = OFF;");
+    // The runner and the simulator may open the same file; wait for a lock instead of failing.
+    db.exec("PRAGMA busy_timeout = 5000; PRAGMA journal_mode = WAL; PRAGMA foreign_keys = OFF;");
     migrateMessagesToAutoincrement(db);
     db.exec("PRAGMA foreign_keys = ON;");
     db.exec(SCHEMA);
@@ -195,11 +196,15 @@ export class Store {
     this.setSetting("summary_rev", String(Number(this.summaryRev()) + 1));
   }
 
-  /** Writes `values` only if the summary wasn't cleared since `rev` was read. Returns whether it wrote. */
-  setSummaryIf(rev: string, values: Record<string, string>): boolean {
-    this.db.exec("BEGIN");
+  /**
+   * Writes `values` only if the summary wasn't cleared since `rev` was read and
+   * its position is still `upto` (another process may have folded meanwhile).
+   * Returns whether it wrote.
+   */
+  setSummaryIf(rev: string, upto: number, values: Record<string, string>): boolean {
+    this.db.exec("BEGIN IMMEDIATE");
     try {
-      if (this.summaryRev() !== rev) {
+      if (this.summaryRev() !== rev || Number(this.getSetting("summary_upto") ?? 0) !== upto) {
         this.db.exec("ROLLBACK");
         return false;
       }

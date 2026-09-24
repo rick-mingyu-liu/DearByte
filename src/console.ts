@@ -10,7 +10,7 @@ import type { Store } from "./storage/store.ts";
 
 export const COMMON_HELP = `  /memory               列出记得的事
   /memory on | off      开启 / 关闭长期记忆
-  /memory forget <id>   删除一条记忆
+  /memory forget <id>   删除一条记忆（更早聊天的摘要也一起清掉）
   /memory export        导出记忆到 data/memory-export.md
   /history clear        清空聊天记录（记忆保留）
   /status               当前状态
@@ -106,7 +106,7 @@ export async function runSharedCommand(line: string, ctx: { store: Store; timeZo
       store.setMemoryEnabled(sub === "on");
       log(sub === "on" ? "长期记忆已开启：之后的消息里值得记的事会被记下" : "长期记忆已关闭：已有记忆保留但不再使用，也不再新增");
     } else if (sub === "forget") {
-      log(store.forgetFact(Number(arg)) ? `已删除 #${arg}，之前的消息不会让它再被记起` : `没有找到 #${arg}`);
+      log(store.forgetFact(Number(arg)) ? `已删除 #${arg}，之前的消息不会让它再被记起；更早聊天的摘要也清掉了` : `没有找到 #${arg}`);
     } else if (sub === "export") {
       log(`已导出到 ${exportMemory(store, ctx.timeZone).replace(ROOT, "")}`);
     } else log("用法：/memory [on|off|forget <id>|export]");

@@ -73,7 +73,7 @@ export async function updateSummary(opts: { model: ChatModel; store: Store; wind
   }
   // Written together, and only if nobody cleared the summary meanwhile
   // (/history clear, /memory forget): this fold was built on the old one.
-  const wrote = store.setSummaryIf(rev, { [SUMMARY_SETTING]: summary, [SUMMARY_UPTO_SETTING]: String(aged.at(-1)!.id) });
+  const wrote = store.setSummaryIf(rev, upto, { [SUMMARY_SETTING]: summary, [SUMMARY_UPTO_SETTING]: String(aged.at(-1)!.id) });
   return wrote ? { folded: aged.length, chars: [...summary].length } : null;
 }
 

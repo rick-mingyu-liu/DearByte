@@ -131,3 +131,15 @@ test("a long history is folded 100 at a time", async () => {
   expect(await updateSummary({ model, store, window: 40, timeZone: "UTC" })).toMatchObject({ folded: 100 });
   expect(store.getSetting(SUMMARY_UPTO_SETTING)).toBe("100");
 });
+
+test("a fold is discarded if another process moved the summary meanwhile", async () => {
+  const store = withMessages(60);
+  const model = new FakeModel([
+    () => {
+      store.setSetting(SUMMARY_UPTO_SETTING, "10"); // someone else folded 1–10
+      return summaryOf("重复的");
+    },
+  ]);
+  expect(await updateSummary({ model, store, window: 40, timeZone: "UTC" })).toBeNull();
+  expect(store.getSetting(SUMMARY_UPTO_SETTING)).toBe("10");
+});
