@@ -10,6 +10,7 @@
 <a href="https://github.com/rick-mingyu-liu/DearByte/stargazers"><img src="https://img.shields.io/github/stars/rick-mingyu-liu/DearByte?style=flat" alt="GitHub Stars"></a>
 <img src="https://img.shields.io/badge/status-experimental-orange" alt="Status: experimental">
 <img src="https://img.shields.io/badge/Node.js-26%2B-339933" alt="Node.js 26+">
+<a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT"></a>
 </p>
 
 <p align="center"><a href="#quick-start">Quick start</a> · <a href="docs/guide.en.md">User guide</a> · <a href="#data-and-privacy">Data and privacy</a> · <a href="#contributing">Contributing</a></p>
@@ -137,3 +138,9 @@ Use [Issues](https://github.com/rick-mingyu-liu/DearByte/issues) to report probl
 ## Acknowledgments
 
 Xiaobai's conversation design draws on ideas from [狗头军师](https://github.com/shengjidaguai-china/goutoujunshi), [咫尺](https://github.com/oaa529/zhichi), and [前任.skill](https://github.com/perkfly/ex-skill). See [upstream provenance](docs/upstream-provenance.md) for sources, adaptations and differences.
+
+## License
+
+[MIT](LICENSE). The upstream projects it draws on are MIT-licensed too; see [upstream provenance](docs/upstream-provenance.md) for sources and adaptations.
+
+DearByte drives WeChat through unofficial automation, which Tencent's terms don't allow, and the account may be restricted. It's a personal experiment: use a test account, never your main one.

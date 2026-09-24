@@ -10,6 +10,7 @@
 <a href="https://github.com/rick-mingyu-liu/DearByte/stargazers"><img src="https://img.shields.io/github/stars/rick-mingyu-liu/DearByte?style=flat" alt="GitHub Stars"></a>
 <img src="https://img.shields.io/badge/status-experimental-orange" alt="实验原型">
 <img src="https://img.shields.io/badge/Node.js-26%2B-339933" alt="Node.js 26+">
+<a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT"></a>
 </p>
 
 <p align="center"><a href="#快速开始">快速开始</a> · <a href="docs/guide.zh-CN.md">使用指南</a> · <a href="#数据与隐私">数据与隐私</a> · <a href="#参与开发">参与开发</a></p>
@@ -137,3 +138,9 @@ npm run typecheck
 ## 致谢
 
 小拜的对话设计参考了 [狗头军师](https://github.com/shengjidaguai-china/goutoujunshi)、[咫尺](https://github.com/oaa529/zhichi) 和 [前任.skill](https://github.com/perkfly/ex-skill) 的部分思路。具体来源、采用方式和差异见[来源说明（英文）](docs/upstream-provenance.md)。
+
+## 许可证
+
+[MIT](LICENSE)。借鉴的上游项目也都是 MIT 许可，来源和改编方式见[来源说明（英文）](docs/upstream-provenance.md)。
+
+本项目通过非官方方式操作微信，不符合腾讯的使用规则，账号可能被限制。仅供个人实验，请使用测试账号，不要用主账号运行。
