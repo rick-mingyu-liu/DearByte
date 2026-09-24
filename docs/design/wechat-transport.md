@@ -52,3 +52,14 @@ Row titles:
 - **The Mac must stay awake** with the chat open, scrolled to the bottom. Scrolling up or switching chats pauses replies until it's back.
 - **One-to-one only:** any sender who isn't "Me" is treated as the user. Group chats would need the sender kept.
 - **Not a product:** this route can't be sold. Selling would need a different transport (see the plan).
+
+## Stickers and pictures (probed 2026-09-24)
+
+小拜 can't send pictures or stickers while WeChat sits in the background:
+
+- **Pasting into the composer:** pasting an image (as a file link or as PNG data) with ⌘V sent through `postToPid` does nothing. WeChat's Edit → Paste menu item is disabled while WeChat isn't the active app.
+- **The Stickers button:** it exists in the chat toolbar (`AXButton` titled "Stickers"), but the panel it opens isn't exposed through Accessibility while WeChat is on another Space.
+
+So sending stickers means bringing WeChat to the front for a moment: activate it, paste, press Return, then switch back. That takes focus from whoever is using the Mac, and switches Spaces if WeChat is on another one. Not built yet.
+
+**Emojis:** Unicode emojis are plain text and work. WeChat's own codes such as `[捂脸]` were sent in a test from the English UI; whether they render on the phone is still to be confirmed.
