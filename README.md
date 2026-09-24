@@ -100,7 +100,7 @@ message ─► SQLite (history) ─► prompt ─► deepseek-flash ─► check
 | `DEEPSEEK_API_KEY` | required, unless you use `--fake` |
 | `DEEPSEEK_MODEL` | `deepseek-flash` (supports vision) |
 | `COMPANION_DB` | `data/companion.sqlite` |
-| `COMPANION_TZ` | `Asia/Shanghai` (used to resolve dates like 下周六) |
+| `COMPANION_TZ` | The Mac's time zone. Used for 小拜's sense of time, dates like 下周六, and when it may write first. |
 | `COMPANION_HISTORY_MESSAGES` | `40` (the last 20 turns, verbatim) |
 | `COMPANION_WECHAT_MEDIA_DIR` | unset. The `…/<小拜 account>/Message/MessageTemp/<chat>/Image` folder inside WeChat's container; needed for photos. |
 

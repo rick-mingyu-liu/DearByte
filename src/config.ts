@@ -30,7 +30,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     apiKey: merged.DEEPSEEK_API_KEY || null,
     model: merged.DEEPSEEK_MODEL || "deepseek-flash",
     dbPath: merged.COMPANION_DB || join(ROOT, "data/companion.sqlite"),
-    timeZone: merged.COMPANION_TZ || "Asia/Shanghai",
+    timeZone: merged.COMPANION_TZ || Intl.DateTimeFormat().resolvedOptions().timeZone,
     historyMessages: Number(merged.COMPANION_HISTORY_MESSAGES || 40),
     wechatMediaDir: merged.COMPANION_WECHAT_MEDIA_DIR || null,
   };
