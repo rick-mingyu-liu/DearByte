@@ -35,7 +35,11 @@ export type Initiative = { bubbles: string[]; commit: (sent: string[]) => void }
 export type TurnResult = {
   reply: Reply;
   userMessage: StoredMessage;
-  assistantMessage: StoredMessage;
+  /**
+   * Stores the bubbles that were actually sent (none: nothing is stored), so
+   * 小拜 never remembers saying something that didn't reach the user.
+   */
+  commit: (sent: string[]) => StoredMessage | null;
   /** Resolves when background memory extraction finishes (null when memory is off). */
   memory: Promise<ExtractionOutcome | null>;
 };
@@ -115,10 +119,13 @@ export class Companion {
       reply = { bubbles: reply.bubbles.slice(0, CHAT_MAX_BUBBLES) };
     }
 
-    const assistantMessage = store.addMessage("assistant", reply.bubbles.join("\n"), {
-      bubbles: reply.bubbles,
-      createdAt: new Date(Math.max(Date.now(), now.getTime() + 1)).toISOString(),
-    });
+    const commit = (sent: string[]) =>
+      sent.length
+        ? store.addMessage("assistant", sent.join("\n"), {
+            bubbles: sent,
+            createdAt: new Date(Math.max(Date.now(), now.getTime() + 1)).toISOString(),
+          })
+        : null;
 
     const trackedModel: ChatModel = {
       name: model.name,
@@ -152,7 +159,7 @@ export class Companion {
           })
       : Promise.resolve(null);
 
-    return { reply, userMessage, assistantMessage, memory };
+    return { reply, userMessage, commit, memory };
   }
 
   /**

@@ -57,10 +57,11 @@ const MAX_DROPPED = 50;
  * match; it must match at least half the overlap. Repeated identical messages
  * stay distinct because positions, not texts, are compared.
  */
-export function alignRows(previous: string[], next: string[]): number | null {
+export function alignRows(previous: string[], next: string[], known?: number): number | null {
   // An empty chat that gains a few rows is real; an empty read of a full chat isn't.
   if (!previous.length) return next.length <= 3 ? 0 : null;
   if (!next.length) return null;
+  if (known !== undefined) return confirmAlignment(previous, next, known);
   let best = { dropped: -1, score: 0 };
   for (let dropped = 0; dropped < Math.min(previous.length, MAX_DROPPED + 1); dropped++) {
     const overlap = Math.min(previous.length - dropped, next.length);
@@ -69,6 +70,26 @@ export function alignRows(previous: string[], next: string[]): number | null {
     if (score > best.score && score * 2 >= overlap) best = { dropped, score };
   }
   return best.dropped < 0 ? null : best.dropped;
+}
+
+/**
+ * WeChat 4.x says how far its row window moved, so there's nothing to guess;
+ * only check the rows agree. Guessing would go wrong there: most rows are
+ * blank placeholders, and blank-matches-blank outscores the true shift once a
+ * few messages arrive together, which silently skipped them.
+ */
+function confirmAlignment(previous: string[], next: string[], dropped: number): number | null {
+  if (dropped < 0 || dropped >= previous.length) return null; // the list was rebuilt, or moved past everything we saw
+  const overlap = Math.min(previous.length - dropped, next.length);
+  let both = 0;
+  let same = 0;
+  for (let i = 0; i < overlap; i++) {
+    const [a, b] = [previous[dropped + i], next[i]];
+    if (!a || !b) continue; // placeholders say nothing
+    both++;
+    if (a === b) same++;
+  }
+  return same * 2 >= both ? dropped : null;
 }
 
 /**
@@ -81,8 +102,10 @@ export function newRows(
   next: string[],
   /** `fromEnd` is the row's distance from the newest row (0 = last). */
   wasPending: (title: string, fromEnd: number) => boolean = () => true,
+  /** How far the window moved, when WeChat says (4.x). */
+  known?: number,
 ): string[] | null {
-  const dropped = alignRows(previous, next);
+  const dropped = alignRows(previous, next, known);
   if (dropped === null) return null;
   const overlap = Math.min(previous.length - dropped, next.length);
   const changed = next
@@ -96,8 +119,8 @@ export function newRows(
  * (a partial Accessibility read) keeps its previous text, so when it reads
  * properly again it isn't mistaken for a new message.
  */
-export function rememberRows(previous: string[], next: string[]): string[] {
-  const dropped = alignRows(previous, next);
+export function rememberRows(previous: string[], next: string[], known?: number): string[] {
+  const dropped = alignRows(previous, next, known);
   if (dropped === null) return next;
   return next.map((row, i) => (row === "" && previous[dropped + i] !== undefined ? previous[dropped + i] : row));
 }

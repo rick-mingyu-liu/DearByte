@@ -45,6 +45,8 @@ export class DesktopChannel {
   private readonly loop: ReplyLoop<DesktopMessage>;
   /** Rows from the last time the bound chat was open. */
   private seen: string[] | null = null;
+  /** WeChat 4.x: where `seen` started in the whole list. */
+  private seenOffset: number | null = null;
   private lastStatus = "";
   /** The bound chat's name as WeChat showed it last; sending checks against it. */
   private openName: string | null = null;
@@ -167,7 +169,7 @@ export class DesktopChannel {
   }
 
   /** Handles one snapshot. Public for tests. */
-  poll(snapshot: { chat: string; rows: string[] }): void {
+  poll(snapshot: { chat: string; rows: string[]; offset?: number | null }): void {
     const { names } = this.deps;
     const chat = snapshot.chat;
     if (!names.includes(chat)) {
@@ -178,6 +180,7 @@ export class DesktopChannel {
     if (this.seen === null) {
       this.problem = null;
       this.seen = snapshot.rows;
+      this.seenOffset = snapshot.offset ?? null;
       this.status(`已连接「${chat}」，从现在起的新消息会${this.deps.mode === "draft" ? "生成草稿（不发送）" : "自动回复"}`);
       return;
     }
@@ -190,8 +193,11 @@ export class DesktopChannel {
     this.setProblem(null);
     this.status("");
 
-    const added = newRows(this.seen, snapshot.rows, (old, fromEnd) => old === "" ? fromEnd < LOADING_ROWS : parseRow(old).kind === "meta");
-    this.seen = rememberRows(this.seen, snapshot.rows);
+    const offset = snapshot.offset ?? null;
+    const known = offset !== null && this.seenOffset !== null ? offset - this.seenOffset : undefined;
+    const added = newRows(this.seen, snapshot.rows, (old, fromEnd) => old === "" ? fromEnd < LOADING_ROWS : parseRow(old).kind === "meta", known);
+    this.seen = rememberRows(this.seen, snapshot.rows, known);
+    this.seenOffset = offset;
     if (added === null) {
       this.emit({ type: "status", message: "聊天记录跳动了（滚动或重新加载），重新对齐；这期间的消息可能漏掉" });
       return;

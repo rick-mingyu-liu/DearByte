@@ -518,3 +518,34 @@ test("4.x: when the capture fails, 小拜 is told she can't see it, not given th
   expect(sent).not.toContain("Image");
   expect(events.some((e) => e.type === "status" && e.message.includes("屏幕与系统录音"))).toBe(true);
 });
+
+test("only the bubbles that reached WeChat are remembered as said", async () => {
+  // First bubble goes out, the second fails for good (fill_failed isn't retried).
+  const { channel, store, sent } = setup({ responses: [reply("在的", "刚在忙")], sendErrors: ["", "fill_failed"] });
+  channel.poll({ chat: CHAT, rows: [said("hi")] });
+  channel.poll({ chat: CHAT, rows: [said("hi"), said("在吗")] });
+  await channel.settle();
+  expect(sent).toEqual(["在的"]);
+  expect(store.recentMessages(10).map((m) => m.text)).toEqual(["在吗", "在的"]);
+});
+
+test("4.x: several rows arriving together are all found, using where the row window starts", async () => {
+  const { channel, model } = setup({ responses: [reply("看到了")] });
+  const old = Array.from({ length: 15 }, (_, i) => bubble(`旧${i}`));
+  const window = [...Array(45).fill(""), ...old];
+  channel.poll({ chat: CHAT, rows: window, offset: 200 });
+  // The chat was switched away; meanwhile 8 rows arrived (time labels and messages).
+  // The newest 60 rows now start 8 further down, and the top rows went blank.
+  const added = ["13:20", bubble("在吗"), bubble("问你个事"), "13:21", bubble("明天有空吗"), bubble("想约你"), bubble("吃饭"), bubble("好不好")];
+  const next = [...Array(45).fill(""), ...old, ...added].slice(8);
+  channel.poll({ chat: CHAT, rows: next, offset: 208 });
+  await channel.settle();
+  expect(model.calls).toHaveLength(1);
+  expect(model.calls[0].messages.at(-1)?.content).toBe("在吗\n问你个事\n明天有空吗\n想约你\n吃饭\n好不好");
+});
+
+test("4.x: a window that moved backwards or past everything seen is a resync, not new messages", () => {
+  expect(newRows(["", bubble("a"), bubble("b")], [bubble("x"), bubble("y"), bubble("z")], undefined, 5)).toBeNull();
+  expect(newRows(["", bubble("a"), bubble("b")], ["", bubble("a"), bubble("b")], undefined, -1)).toBeNull();
+  expect(newRows(["", bubble("a"), bubble("b")], [bubble("a"), bubble("b"), bubble("c")], undefined, 1)).toEqual([bubble("c")]);
+});

@@ -11,7 +11,8 @@ const SOURCE = join(ROOT, "native/wechat-desktop/main.swift");
 const BINARY = join(ROOT, ".build/wechat-desktop");
 const REQUEST_TIMEOUT_MS = 15_000;
 
-export type Snapshot = { chat: string; rows: string[]; draft: boolean };
+/** `offset`: WeChat 4.x, where `rows` (the newest ones) start in the whole list; null on 3.8.4. */
+export type Snapshot = { chat: string; rows: string[]; draft: boolean; offset?: number | null };
 
 /** What the channel needs from WeChat; the tests use a fake. */
 export type WechatUi = {
@@ -39,7 +40,7 @@ const HELPER_MESSAGES: Record<string, string> = {
   fill_failed: "没能把文字填进输入框",
   changed_before_send: "发送前聊天或输入框变了，已取消",
   not_sent: "按了回车但消息没发出去，没有发送（输入框里小拜的文字已尽量撤回）",
-  unconfirmed: "按了回车但没看到消息出现，不确定是否发出（不会重发）",
+  unconfirmed: "按了回车，但输入框里的内容被改动了，不确定是否发出（不会重发）",
   not_focused: "输入框没拿到焦点，没有发送",
   other_window_open: "微信开着另一个聊天窗口，回车可能发到那边，没有发送（关掉独立的聊天窗口）",
   window_unknown: "看不出微信当前是哪个窗口在前，没有发送（把微信切到当前桌面看一眼）",
@@ -117,8 +118,8 @@ export class DesktopHelper implements WechatUi {
   }
 
   async snapshot(): Promise<Snapshot> {
-    const { chat, rows, draft } = await this.request<Snapshot>({ cmd: "snapshot" });
-    return { chat, rows, draft };
+    const { chat, rows, draft, offset } = await this.request<Snapshot>({ cmd: "snapshot" });
+    return { chat, rows, draft, offset: offset ?? null };
   }
 
   async send(chat: string, text: string): Promise<void> {

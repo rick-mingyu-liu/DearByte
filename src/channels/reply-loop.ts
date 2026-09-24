@@ -171,11 +171,13 @@ export class ReplyLoop<M extends Incoming<unknown>> {
     }
 
     let bubbles: string[];
+    let commit: (sent: string[]) => unknown = () => {};
     try {
       const turn = await companion.handle({ text, image });
       this.emit({ type: "turn", turn });
       this.track(turn.memory);
       bubbles = turn.reply.bubbles;
+      commit = turn.commit;
     } catch (err) {
       this.emit({ type: "error", message: `生成回复失败，发送兜底回复：${(err as Error).message}` });
       bubbles = FALLBACK_REPLY.bubbles;
@@ -183,7 +185,13 @@ export class ReplyLoop<M extends Incoming<unknown>> {
 
     const wait = readDelay(message.text, message.image !== null, this.random()) - ((this.deps.now ?? Date.now)() - started);
     if (wait > 0) await this.sleep(wait);
-    await this.sendAll(message, bubbles);
+    // Only what reached the chat is remembered as said.
+    const sent = await this.sendAll(message, bubbles);
+    try {
+      commit(sent);
+    } catch (err) {
+      this.emit({ type: "error", message: `回复已发出，但没存进聊天记录：${(err as Error).message}` });
+    }
   }
 
   /**
@@ -199,7 +207,7 @@ export class ReplyLoop<M extends Incoming<unknown>> {
       }
       const result = await this.deps.outlet.sendBubble(message, bubble).catch(() => "failed" as const);
       if (result === "failed") {
-        this.emit({ type: "error", message: `第 ${i + 1} 条气泡发送失败，后面的不再发（聊天记录里仍保存着完整回复）` });
+        this.emit({ type: "error", message: `第 ${i + 1} 条气泡发送失败，后面的不再发（聊天记录里只保存已发出的部分）` });
         break;
       }
       this.emit({ type: result, bubble });
