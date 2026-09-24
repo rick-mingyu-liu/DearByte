@@ -124,6 +124,6 @@ export async function runSharedCommand(line: string, ctx: { store: Store; timeZo
 export function describeModel(settings: ModelSettings | { problem: string }, fake: boolean): string {
   if (fake || "problem" in settings) return "fake";
   const cap = settings.maxCostPerReply > 0 ? `每条回复最多 $${settings.maxCostPerReply}` : "不限每条花费";
-  return `${settings.label} ${settings.model} · ${cap}`;
+  return `${settings.label} ${settings.model} · ${settings.vision ? "能看图" : "看不了图"} · ${cap}`;
 }
 

@@ -110,7 +110,7 @@ npm run dearbyte -- --chat "Alex Zhang" --draft
 | `COMPANION_API_KEY` | 密钥。也可以用各家自己的变量名：`DEEPSEEK_API_KEY`、`OPENAI_API_KEY`、`ANTHROPIC_API_KEY`、`GEMINI_API_KEY`、`DASHSCOPE_API_KEY`、`MOONSHOT_API_KEY`、`ZHIPU_API_KEY`、`OPENROUTER_API_KEY`。Ollama 不需要。`--fake` 模式都不需要 |
 | `COMPANION_BASE_URL` | 覆盖接口地址；`custom` 必填 |
 | `COMPANION_PRICE_INPUT`、`COMPANION_PRICE_OUTPUT`、`COMPANION_PRICE_CACHED` | 模型价格，美元 / 百万 token，照服务商公布的填。DeepSeek 已内置，Ollama 免费；其他付费模型必填，否则没法限制花费，程序不会启动 |
-| `COMPANION_VISION` | `true` 或 `false`：模型能不能看图。默认按服务商判断；看不了图时，小拜会告诉对方她看不到 |
+| `COMPANION_VISION` | `true` 或 `false`：模型能不能看图。默认先看模型名（`vl`、`vision`、`gpt-4o`、`claude`、`gemini`、`glm-4.5v`、`llava` 等），再按服务商判断；启动时会显示“能看图”或“看不了图”。看不了图时，小拜会告诉对方她看不到 |
 | `COMPANION_MAX_COST_PER_REPLY` | `1`：每条回复最多花多少美元，包括修复、安全检查、记忆和摘要。快超时会缩短输出，超了就不再调用模型。`0` 表示不限 |
 | `COMPANION_DB` | `data/companion.sqlite` |
 | `COMPANION_TZ` | Mac 的时区；建议与聊天对象一致，例如 `Asia/Shanghai` |

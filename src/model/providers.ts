@@ -91,7 +91,9 @@ export function resolveModel(env: Record<string, string | undefined>): ModelSett
 
   // Blank or invalid falls back to $1; only an explicit 0 turns the cap off.
   const cap = price(env.COMPANION_MAX_COST_PER_REPLY) ?? 1;
-  const vision = env.COMPANION_VISION ? /^(1|true|yes|on)$/i.test(env.COMPANION_VISION) : (known?.vision ?? preset.vision);
+  const vision = env.COMPANION_VISION
+    ? /^(1|true|yes|on)$/i.test(env.COMPANION_VISION)
+    : (known?.vision ?? guessVision(model) ?? preset.vision);
   return {
     provider,
     label: preset.label,
@@ -103,6 +105,22 @@ export function resolveModel(env: Record<string, string | undefined>): ModelSett
     prices,
     maxCostPerReply: cap,
   };
+}
+
+/** Names that say a model is text-only; checked first, so "qwen-coder-vl" style oddities stay text-only. */
+const TEXT_ONLY = /embed|whisper|tts|rerank|gpt-3\.5|o1-mini|o3-mini|deepseek-(chat|reasoner|coder)|qwq|coder/i;
+/** Names of model families that read images, as providers and OpenRouter spell them. */
+const READS_IMAGES =
+  /(^|[-_/.:])vl([-_/.:]|$)|vision|omni|gpt-4o|gpt-4\.1|gpt-4-turbo|gpt-5|chatgpt-4o|claude|gemini|gemma-?3|pixtral|llava|minicpm-v|moondream|internvl|qvq|glm-[\d.]+v|llama-?4|llama-?3\.2-\d+b-vision/i;
+
+/**
+ * Whether a model reads images, guessed from its name; null when the name says
+ * nothing, so the provider's default applies. COMPANION_VISION overrides.
+ */
+export function guessVision(model: string): boolean | null {
+  if (TEXT_ONLY.test(model)) return false;
+  if (READS_IMAGES.test(model)) return true;
+  return null;
 }
 
 function price(value: string | undefined): number | null {

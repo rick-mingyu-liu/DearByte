@@ -142,7 +142,7 @@ message ─► SQLite (history) ─► prompt ─► deepseek-flash ─► check
 | `COMPANION_API_KEY` | The key. Each provider's own variable works too: `DEEPSEEK_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `DASHSCOPE_API_KEY`, `MOONSHOT_API_KEY`, `ZHIPU_API_KEY`, `OPENROUTER_API_KEY`. Ollama needs none, and neither does `--fake`. |
 | `COMPANION_BASE_URL` | Overrides the API address; required for `custom`. |
 | `COMPANION_PRICE_INPUT`, `COMPANION_PRICE_OUTPUT`, `COMPANION_PRICE_CACHED` | USD per 1M tokens, as the provider publishes them. Built in for DeepSeek; Ollama is free. Required for any other paid model, or the spending cap can't work and the runner won't start. |
-| `COMPANION_VISION` | `true` or `false`: whether the model reads images. Guessed from the provider by default. Without vision, 小拜 tells the user she can't see the photo. |
+| `COMPANION_VISION` | `true` or `false`: whether the model reads images. By default it's guessed from the model's name (`vl`, `vision`, `gpt-4o`, `claude`, `gemini`, `glm-4.5v`, `llava` and so on), then from the provider. The startup line shows 能看图 or 看不了图. Without vision, 小拜 tells the user she can't see the photo. |
 | `COMPANION_MAX_COST_PER_REPLY` | `1`. The most one reply may cost in USD, including repairs, the safety check, memory and the summary. Near the limit the output cap shrinks; past it, no more model calls. `0` turns it off. |
 | `COMPANION_DB` | `data/companion.sqlite` |
 | `COMPANION_ALERT_URL` | Optional. An ntfy topic URL for alerts on your phone. |

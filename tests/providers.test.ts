@@ -36,6 +36,30 @@ test("Ollama needs no key and costs nothing; custom needs a base URL; unknown pr
   expect(resolveModel({ COMPANION_PROVIDER: "nope" })).toHaveProperty("problem", expect.stringContaining("deepseek"));
 });
 
+test("whether a model reads images is guessed from its name", () => {
+  const withModel = (provider: string, model: string) =>
+    ok(resolveModel({ COMPANION_PROVIDER: provider, COMPANION_MODEL: model, COMPANION_API_KEY: "k", COMPANION_PRICE_INPUT: "1", COMPANION_PRICE_OUTPUT: "1" })).vision;
+  // Providers whose default is off, with image models.
+  expect(withModel("qwen", "qwen-vl-max")).toBe(true);
+  expect(withModel("qwen", "qwen3-vl-plus")).toBe(true);
+  expect(withModel("zhipu", "glm-4.5v")).toBe(true);
+  expect(withModel("moonshot", "moonshot-v1-8k-vision-preview")).toBe(true);
+  expect(withModel("openrouter", "anthropic/claude-sonnet-4.5")).toBe(true);
+  expect(withModel("openrouter", "google/gemini-2.5-flash")).toBe(true);
+  expect(withModel("ollama", "llava:13b")).toBe(true);
+  expect(withModel("ollama", "gemma3:12b")).toBe(true);
+  // Text-only names, even where the provider's default is on.
+  expect(withModel("qwen", "qwen-plus")).toBe(false);
+  expect(withModel("openai", "gpt-3.5-turbo")).toBe(false);
+  expect(withModel("deepseek", "deepseek-chat")).toBe(false);
+  expect(withModel("qwen", "qwen2.5-coder-32b")).toBe(false);
+  // Nothing in the name: the provider's default.
+  expect(withModel("openai", "some-new-model")).toBe(true);
+  expect(withModel("moonshot", "kimi-k2")).toBe(false);
+  // The setting always wins.
+  expect(ok(resolveModel({ COMPANION_PROVIDER: "qwen", COMPANION_MODEL: "qwen-plus", COMPANION_API_KEY: "k", COMPANION_PRICE_INPUT: "1", COMPANION_PRICE_OUTPUT: "1", COMPANION_VISION: "true" })).vision).toBe(true);
+});
+
 test("the cap and vision can be set", () => {
   const base = { DEEPSEEK_API_KEY: "k" };
   expect(ok(resolveModel({ ...base, COMPANION_MAX_COST_PER_REPLY: "0.2" })).maxCostPerReply).toBe(0.2);
