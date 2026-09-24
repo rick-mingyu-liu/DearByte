@@ -54,6 +54,10 @@ test("typing pauses grow with length, vary, and stay capped", () => {
   expect(bubbleDelay("好", 0.5)).toBeLessThan(bubbleDelay("这句话要打好一会儿才能打完", 0.5));
   expect(bubbleDelay("好", 0)).toBeLessThan(bubbleDelay("好", 0.99));
   expect(bubbleDelay("长".repeat(200), 0.99)).toBeLessThanOrEqual(5_000);
-  expect(readDelay(0)).toBe(1_500);
-  expect(readDelay(0.99)).toBeLessThan(3_500);
+  // Short messages are read quickly; long ones and photos take longer, never over 3 s (± 25%).
+  expect(readDelay("在吗", false)).toBe(620);
+  expect(readDelay("在吗", false, 0)).toBeLessThan(readDelay("在吗", false, 0.99));
+  expect(readDelay("今天下午面试的时候我紧张得手都在抖，你说我是不是太没出息了", false)).toBeGreaterThan(1_500);
+  expect(readDelay("", true)).toBeGreaterThan(readDelay("", false));
+  expect(readDelay("很长".repeat(200), true, 0.99)).toBeLessThan(3_750);
 });

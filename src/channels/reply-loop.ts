@@ -8,7 +8,7 @@ import type { ImageInput } from "../domain.ts";
 import { imageFromBytes } from "../media/images.ts";
 
 /** How long to wait for follow-up messages before answering a burst. */
-const BURST_WINDOW_MS = 1_500;
+const BURST_WINDOW_MS = 1_000;
 
 export type Incoming<Ref> = { text: string; image: Ref | null };
 
@@ -57,10 +57,12 @@ export const bubbleDelay = (bubble: string, random = 0.5) =>
 
 /**
  * The shortest time between a message arriving and the first bubble, as if
- * reading it first: 1.5–3.5 s. Model time counts towards it, so slow turns
- * aren't delayed further.
+ * reading it first: about 0.6 s for 「在吗」, longer for a long message or a
+ * photo, never over 3 s. Model time counts towards it, so slow turns aren't
+ * delayed further.
  */
-export const readDelay = (random = 0.5) => Math.round(1_500 + 2_000 * random);
+export const readDelay = (text: string, image: boolean, random = 0.5) =>
+  Math.round(Math.min(3_000, 500 + 60 * [...text].length + (image ? 1_200 : 0)) * (0.75 + random / 2));
 
 export class ReplyLoop<M extends Incoming<unknown>> {
   private queue: M[] = [];
@@ -179,7 +181,7 @@ export class ReplyLoop<M extends Incoming<unknown>> {
       bubbles = FALLBACK_REPLY.bubbles;
     }
 
-    const wait = readDelay(this.random()) - ((this.deps.now ?? Date.now)() - started);
+    const wait = readDelay(message.text, message.image !== null, this.random()) - ((this.deps.now ?? Date.now)() - started);
     if (wait > 0) await this.sleep(wait);
     await this.sendAll(message, bubbles);
   }

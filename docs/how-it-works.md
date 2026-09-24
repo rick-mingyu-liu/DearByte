@@ -23,7 +23,7 @@ It's written for someone reading the code for the first time. The details live i
         │  JSON lines over stdin/stdout
         ▼
  src/dearbyte.ts (the runner)
-   ├─ DesktopChannel    polls the chat every second and finds new messages
+   ├─ DesktopChannel    polls the chat twice a second and finds new messages
    ├─ ReplyLoop         merges quick messages, adds human pauses, sends bubbles
    ├─ Companion         builds the prompt, calls the model, checks the output
    │    ├─ memory       facts, style rules, rolling summary   (SQLite)
@@ -46,9 +46,9 @@ Here is what happens when you send 「今天好累」 ("so tired today") at 21:0
 | 1 | **WeChat** | Your phone sends it to Tencent. WeChat on 小拜's Mac shows a new row, `AlexSaid:今天好累`, using your WeChat nickname. | under 1 s |
 | 2 | **Helper** (`main.swift`) | Once a second the runner asks "what's in the chat?". The helper reads the chat title and every row title through Accessibility, and returns `{chat, rows}`. | ~50 ms |
 | 3 | **Channel** (`channel.ts`) | Checks the open chat is one of your names in `contacts.json`, or it replies to nobody. Lines the new snapshot up with the last one; the extra row at the bottom is new. Parses it as text from you. If a second person ever speaks, it's a group chat, so it pauses. | instant |
-| 4 | **Reply loop** (`reply-loop.ts`) | Waits 1.5 s for more messages, so 「今天好累」「不想动」 become one turn. If 小拜 is already answering, the new message waits its turn. | 1.5 s |
+| 4 | **Reply loop** (`reply-loop.ts`) | Waits 1 s for more messages, so 「今天好累」「不想动」 become one turn. If 小拜 is already answering, the new message waits its turn. | 1 s |
 | 5 | **Companion** (`companion.ts`) | Saves your message. Checks for crisis keywords, and starts the model crisis check at the same time as the reply. Loads your facts, style rules and the summary. Builds the prompt and asks the model for `{"bubbles": [...]}`. Repairs bad output, cuts to 2 bubbles, saves the reply. | ~1.2 s |
-| 6 | **Reply loop** again | Holds the first bubble until at least 1.5–3.5 s after your message, as if reading. Then it sends each bubble, pausing about 150 ms per character between them, as if typing. | 2–5 s |
+| 6 | **Reply loop** again | Holds the first bubble for a reading pause that grows with your message: about 0.6 s for 「在吗」, at most 3 s. The model's time counts toward it. Then it sends each bubble, pausing about 150 ms per character between them, as if typing. | 2–5 s |
 | 7 | **Helper** again | Checks the right chat is open and the box is empty, fills in the bubble, presses Return, and waits for a `MeSaid:` row to confirm. A bubble it can't confirm is never resent. | ~0.5 s per bubble |
 | 8 | **Memory** (background) | A second, cheaper call looks for facts in 「今天好累」 (probably none). If 10 more messages have left the 40-message window, it folds them into the summary. You never wait for this. | ~1–2 s |
 
@@ -97,12 +97,12 @@ Then it fills in the text, presses Return, and confirms that a new `MeSaid:<text
 
 ## 2. How a reply is made
 
-1. **Collect.** Several quick messages (within about 1.5 s) become one turn, like a person reading a burst before answering. A photo in the burst is attached.
+1. **Collect.** Several quick messages (within about 1 s) become one turn, like a person reading a burst before answering. A photo in the burst is attached.
 2. **Build the prompt** (section 3) from the persona, examples, time, memory, recent chat and your new message. Your message also gets an energy score (`src/companion/energy.ts`). A short, flat one (「嗯」「在干嘛」) tells 小拜 to answer in 1 bubble. A medium one gets 1 unless she has two different things to say. A long, excited one, or a photo, leaves it to her. Before this, almost every reply was 2 bubbles. Now it's 1.4 on average.
 3. **Call the model** in JSON mode: `{"bubbles": ["…", "…"]}`. Each string is one WeChat bubble.
 4. **Check the output.** If it isn't valid JSON or breaks the limits, there is one repair attempt; then salvage what's usable; then a fixed fallback. More than 2 bubbles are cut to 2, because a third bubble always read as AI over-explaining. Crisis replies are the exception.
 5. **Safety check in parallel.** A small classifier call runs alongside the reply (section 6).
-6. **Send like a person.** The first bubble comes 1.5–3.5 s after your message at the earliest, as if reading it. Each later bubble waits about as long as typing it takes (~150 ms per character, ±25% jitter).
+6. **Send like a person.** The first bubble waits as if reading it: about 0.6 s for 「在吗」, longer for a long message or a photo, at most 3 s (±25%); the model's time counts toward it. Each later bubble waits about as long as typing it takes (~150 ms per character, ±25% jitter).
 7. **Remember.** After the reply, in the background, facts are pulled from your message and old chat is folded into the summary (section 4).
 
 **Cost.** About $0.0005–0.001 per message in total (reply, memory, safety check), so roughly a cent for a long evening of chat.

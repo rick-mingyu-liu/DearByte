@@ -9,10 +9,10 @@ import { HelperError, type WechatUi } from "./helper.ts";
 import type { PhotoFolder } from "./photos.ts";
 import { bubbleKey, bubbleLabel, describeOther, newRows, parseRow, rememberRows } from "./rows.ts";
 
-const POLL_MS = 1_000;
+const POLL_MS = 500;
 const ERROR_BACKOFF_MS = 5_000;
 /** This many empty reads in a row (about 30 s) count as a problem, not a blip. */
-const EMPTY_READS_PROBLEM = 30;
+const EMPTY_READS_PROBLEM = 60;
 /** A draft in the composer (someone typing on the Mac) gets this long to clear. */
 const BUSY_RETRIES = 3;
 const BUSY_WAIT_MS = 3_000;

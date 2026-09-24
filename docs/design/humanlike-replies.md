@@ -24,7 +24,7 @@
 4. **Photos:** react like a friend, point at one detail at most, don't read out or translate text in the picture.
 5. **Examples rewritten** to be short, plus new ones for a photo with a caption, "are you human?" and "have you eaten?". Examples shape style more than rules.
 6. **Anti-repeat:** the phrases 小拜 used in its last 3 turns go at the end of the prompt with "don't reuse these".
-7. **Timing:** at least 1.5–3.5 s between message and first bubble (model time counts toward it), then ~150 ms per character between bubbles, with ±25% jitter.
+7. **Timing:** a reading pause before the first bubble that grows with the message: about 0.6 s for 「在吗」, up to 3 s for a long message or a photo (model time counts toward it; changed from a flat 1.5–3.5 s after friends found replies slow), then ~150 ms per character between bubbles, with ±25% jitter.
 
 8. **After live feedback (same day):** replies were still too long, and 「你爱我吗」 got a hedge (「爱这个字太重了，我可不敢乱认」). Now most replies are 1 bubble, at most 2 for small talk, and love/like questions get a clear, confident yes (「爱啊」「这还用问」), light and never clingy.
 10. **Two bubbles at most** (live feedback: the third bubble, e.g. 「不过我猜你今天是想找个人说话」, always read as AI). The persona says so and bans guessing at the user's motives; the code also cuts chat replies to two (`CHAT_MAX_BUBBLES`), except in a crisis, where the safety prompt needs room for hotline numbers.
