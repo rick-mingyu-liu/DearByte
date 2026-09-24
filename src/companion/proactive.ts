@@ -177,7 +177,7 @@ function pickPlan(ctx: PlanContext): ProactivePlan | null {
     !talkedToday &&
     fresh("morning")
   ) {
-    return { key: "morning", note: "现在是早上。跟用户随口打个招呼，可以顺带聊点今天的事（早饭、天气、今天要忙啥都行），每天说法别一样。" };
+    return { key: "morning", note: "现在是早上。跟用户随口打个招呼，可以顺带聊点今天的事（早饭、天气、今天要忙啥都行），每天说法别一样。别说自己刚睡醒、睁眼、起床。" };
   }
   return null;
 }

@@ -96,6 +96,16 @@ export class DesktopChannel {
     this.deps.onEvent?.(event);
   }
 
+  /** Records why 小拜 can't read the chat; clearing a real problem is reported once. */
+  private setProblem(problem: string | null) {
+    if (problem === null && this.problem !== null && this.seen !== null) {
+      this.lastStatus = "";
+      this.emit({ type: "status", message: `已恢复，又能读到「${this.openName}」了，新消息会正常${this.deps.mode === "draft" ? "生成草稿" : "回复"}` });
+    }
+    this.problem = problem;
+    if (problem) this.status(problem);
+  }
+
   /** Reports a status line once, not on every poll. */
   private status(message: string) {
     if (message === this.lastStatus) return;
@@ -129,8 +139,7 @@ export class DesktopChannel {
       try {
         this.poll(await this.deps.ui.snapshot());
       } catch (err) {
-        this.problem = `读取微信失败：${(err as Error).message}`;
-        this.status(this.problem);
+        this.setProblem(`读取微信失败：${(err as Error).message}`);
         wait = ERROR_BACKOFF_MS;
       }
       if (!signal.aborted) await this.sleep(wait);
@@ -142,23 +151,23 @@ export class DesktopChannel {
     const { names } = this.deps;
     const chat = snapshot.chat;
     if (!names.includes(chat)) {
-      this.problem = `微信当前打开的是「${chat || "（无）"}」，不是「${names.join("」「")}」；切回去之前不会回复`;
-      this.status(this.problem);
+      this.setProblem(`微信当前打开的是「${chat || "（无）"}」，不是「${names.join("」「")}」；切回去之前不会回复`);
       return;
     }
-    this.problem = null;
     this.openName = chat;
     if (this.seen === null) {
+      this.problem = null;
       this.seen = snapshot.rows;
       this.status(`已连接「${chat}」，从现在起的新消息会${this.deps.mode === "draft" ? "生成草稿（不发送）" : "自动回复"}`);
       return;
     }
     // A full chat never really empties between two polls; that's a bad read.
     if (!snapshot.rows.length && this.seen.length) {
-      if (++this.emptyReads >= EMPTY_READS_PROBLEM) this.problem = "微信的聊天记录一直读成空的（窗口可能被挡住或最小化了）";
+      if (++this.emptyReads >= EMPTY_READS_PROBLEM) this.setProblem("微信的聊天记录一直读成空的（窗口可能被挡住或最小化了）");
       return;
     }
     this.emptyReads = 0;
+    this.setProblem(null);
     this.status("");
 
     const added = newRows(this.seen, snapshot.rows, (old) => parseRow(old).kind === "meta");

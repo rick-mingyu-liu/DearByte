@@ -376,6 +376,18 @@ test("the channel reports a problem while another chat is open, and clears it wh
   expect(channel.problem).toBeNull();
 });
 
+test("recovery is reported once, and not on the first connection", () => {
+  const { channel, events } = setup();
+  const recovered = () => events.filter((e) => e.type === "status" && e.message.startsWith("已恢复")).length;
+  channel.poll({ chat: "", rows: [] });
+  channel.poll({ chat: CHAT, rows: [said("早")] });
+  expect(recovered()).toBe(0);
+  channel.poll({ chat: "", rows: [] });
+  channel.poll({ chat: CHAT, rows: [said("早")] });
+  channel.poll({ chat: CHAT, rows: [said("早")] });
+  expect(recovered()).toBe(1);
+});
+
 test("a bubble that can't be sent is reported as a send failure", async () => {
   const { channel, events } = setup({ responses: [reply("在")], sendErrors: ["not_sent"] });
   channel.poll({ chat: CHAT, rows: [] });
