@@ -76,4 +76,6 @@ It breaks if the pack order or panel layout changes.
 
 In general, sending stickers means bringing WeChat to the front for a moment: activate it, paste, press Return, then switch back. That takes focus from whoever is using the Mac, and switches Spaces if WeChat is on another one. Not built yet.
 
-**Emojis:** Unicode emojis are plain text and work. WeChat's own codes such as `[捂脸]` were sent in a test from the English UI; whether they render on the phone is still to be confirmed.
+**Emojis:** Unicode emojis are plain text and work. WeChat's own codes such as `[捂脸]` are sent as text from the English UI and render as pictures on the phone (confirmed 2026-09-24).
+
+**Decision (2026-09-24): emojis only for now.** Stickers can't be sent in the background on a Mac someone is using. If they're wanted later, WeChat needs a screen of its own where it can stay in front: a spare Mac, or a macOS VM (UTM/Tart; WeChat 3.8.4 in a VM is untested).
