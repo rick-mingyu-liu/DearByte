@@ -1,18 +1,18 @@
 // Terminal simulator: you play the WeChat user, 小拜 replies through the real
 // pipeline (model, SQLite history, long-term memory). No WeChat connection.
 //
-//   npm run companion              # DeepSeek, key from .env
+//   npm run companion              # the provider in .env (DeepSeek by default)
 //   npm run companion -- --fake    # no API calls; replies are labelled fake
 
 import { createInterface } from "node:readline/promises";
 import { Companion } from "./companion/companion.ts";
-import { COMMON_HELP, describeEvent, dim, log, runSharedCommand, sleep } from "./console.ts";
+import { COMMON_HELP, describeEvent, describeModel, dim, log, runSharedCommand, sleep } from "./console.ts";
 import { loadPromptParts } from "./companion/prompt.ts";
 import { loadConfig, ROOT } from "./config.ts";
 import { applyRetention } from "./memory/summary.ts";
 import { ImageError, loadImage, parseImageArgs } from "./media/images.ts";
-import { DeepSeekModel } from "./model/deepseek.ts";
 import { FakeModel } from "./model/fake.ts";
+import { createModel, type ModelSettings } from "./model/providers.ts";
 import type { ChatModel } from "./model/provider.ts";
 import { Store } from "./storage/store.ts";
 
@@ -24,13 +24,13 @@ ${COMMON_HELP}`;
 async function main() {
   const config = loadConfig();
   const fake = process.argv.includes("--fake");
-  if (!fake && !config.apiKey) {
-    console.error("缺少 DEEPSEEK_API_KEY（写在 .env 里），或用 --fake 离线运行。");
+  if (!fake && "problem" in config.model) {
+    console.error(`${config.model.problem}\n或用 --fake 测试。`);
     process.exit(1);
   }
   // While bubbles are printing, event lines are held so they don't interleave.
   let held: string[] | null = null;
-  const model: ChatModel = fake ? new FakeModel() : new DeepSeekModel(config.apiKey!, config.model);
+  const model: ChatModel = fake ? new FakeModel() : createModel(config.model as ModelSettings);
   const store = Store.open(config.dbPath);
   const pruned = applyRetention(store, config.historyDays);
   if (pruned) log(`删除了 ${pruned} 条超过 ${config.historyDays} 天的聊天记录（已并进摘要的部分）`);
@@ -49,7 +49,7 @@ async function main() {
 
   const status = () =>
     log(
-      `模型 ${model.name}${fake ? "（假模型，不是真实回复）" : ""} · 数据库 ${config.dbPath.replace(ROOT, "")} · ` +
+      `模型 ${describeModel(config.model, fake)}${fake ? "（假模型，不是真实回复）" : ""} · 数据库 ${config.dbPath.replace(ROOT, "")} · ` +
         `${store.messageCount()} 条聊天记录 · 长期记忆${store.memoryEnabled() ? `开启（${store.activeFacts().length} 条）` : "关闭"} · 渠道：终端模拟（未连接微信）`,
     );
   status();

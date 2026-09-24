@@ -42,6 +42,36 @@ npm run dearbyte -- --proactive off
 
 要读取照片，在 `.env` 设置 `COMPANION_WECHAT_MEDIA_DIR`，指向该账号、该聊天的 `Message/MessageTemp/<chat>/Image` 目录。不配置时，小拜会被告知无法查看图片。语音、视频、文件和表情包目前不能直接读取。
 
+### 设置允许回复的联系人
+
+1. 在登录小拜账号的 Mac 微信主窗口中，打开你希望小拜回复的一对一聊天。
+2. 按聊天顶部显示的名称运行以下命令；名称含空格时也要完整放在引号内：
+
+```bash
+npm run dearbyte -- --chat "Alex Zhang" --draft
+```
+
+首次设置会核对当前聊天名称，然后创建 `data/contacts.json`。`--draft` 只生成草稿，不发送，方便先检查设置。确认后退出程序，再运行 `npm run dearbyte` 开始自动回复。
+
+要添加**同一个人的其他显示名称**，编辑项目根目录下的 `data/contacts.json`，例如：
+
+```json
+{
+  "contacts": [
+    {
+      "id": "me",
+      "names": ["张三", "Alex Zhang"]
+    }
+  ]
+}
+```
+
+这里的 `张三` 和 `Alex Zhang` 是同一个人的备注或昵称示例，请换成微信实际可能显示的名称。`names` 匹配聊天顶部显示的名称，不是微信号；`id` 是内部标识，保留 `me` 即可。示例文件见 [contacts.example.json](../contacts.example.json)。
+
+保存后退出并重新运行 `npm run dearbyte`。文件已存在时，`--chat` 不会追加或覆盖联系人，必须直接编辑文件。当前仅支持一个联系人，不要用多个名字代表不同的人，也不要添加第二个联系人对象。联系人之间尚未隔离历史与记忆，修改名单不等于建立新的独立对话。
+
+如果小拜一直等待，请检查当前聊天顶部的名称是否与 `names` 中某一项完全一致，并确认编辑后已重启。该文件含真实姓名，已被 Git 忽略。
+
 ### 运行中控制
 
 | 命令 | 作用 |
@@ -75,14 +105,31 @@ npm run dearbyte -- --proactive off
 
 | 变量 | 默认值与说明 |
 | --- | --- |
-| `DEEPSEEK_API_KEY` | 必填；`--fake` 模式除外 |
-| `DEEPSEEK_MODEL` | `deepseek-flash` |
+| `COMPANION_PROVIDER` | `deepseek`（默认）。也可以是 `openai`、`anthropic`、`gemini`、`qwen`、`moonshot`（Kimi）、`zhipu`（GLM）、`openrouter`、`ollama`（本地），或 `custom`（任何 OpenAI 兼容接口） |
+| `COMPANION_MODEL` | 模型名。DeepSeek 默认 `deepseek-flash`（旧的 `DEEPSEEK_MODEL` 仍然有效），其他服务商必填 |
+| `COMPANION_API_KEY` | 密钥。也可以用各家自己的变量名：`DEEPSEEK_API_KEY`、`OPENAI_API_KEY`、`ANTHROPIC_API_KEY`、`GEMINI_API_KEY`、`DASHSCOPE_API_KEY`、`MOONSHOT_API_KEY`、`ZHIPU_API_KEY`、`OPENROUTER_API_KEY`。Ollama 不需要。`--fake` 模式都不需要 |
+| `COMPANION_BASE_URL` | 覆盖接口地址；`custom` 必填 |
+| `COMPANION_PRICE_INPUT`、`COMPANION_PRICE_OUTPUT`、`COMPANION_PRICE_CACHED` | 模型价格，美元 / 百万 token，照服务商公布的填。DeepSeek 已内置，Ollama 免费；其他付费模型必填，否则没法限制花费，程序不会启动 |
+| `COMPANION_VISION` | `true` 或 `false`：模型能不能看图。默认按服务商判断；看不了图时，小拜会告诉对方她看不到 |
+| `COMPANION_MAX_COST_PER_REPLY` | `1`：每条回复最多花多少美元，包括修复、安全检查、记忆和摘要。快超时会缩短输出，超了就不再调用模型。`0` 表示不限 |
 | `COMPANION_DB` | `data/companion.sqlite` |
 | `COMPANION_TZ` | Mac 的时区；建议与聊天对象一致，例如 `Asia/Shanghai` |
 | `COMPANION_HISTORY_MESSAGES` | `40`，保留在上下文中的最近消息数 |
 | `COMPANION_HISTORY_DAYS` | `30`，历史保留天数；`0` 表示不按天数清理 |
 | `COMPANION_WECHAT_MEDIA_DIR` | 未设置；微信中该聊天的本地图片目录 |
 | `COMPANION_ALERT_URL` | 可选的 ntfy 主题 URL，用于手机接收运行异常通知 |
+
+换服务商的例子（价格填服务商公布的数）：
+
+```dotenv
+COMPANION_PROVIDER=anthropic
+COMPANION_MODEL=服务商文档里的模型名
+ANTHROPIC_API_KEY=你的密钥
+COMPANION_PRICE_INPUT=…
+COMPANION_PRICE_OUTPUT=…
+```
+
+小拜的人设是用 DeepSeek 调出来的，换模型后说话方式可能会变。可以先用 `npm run bakeoff -- --provider anthropic --model <模型名>` 对比一下。
 
 配置 ntfy 后，需要在手机 ntfy 应用订阅对应主题。使用难以猜测的主题名；手机通知不包含聊天名称，详细原因留在 Mac 通知中。
 
@@ -92,7 +139,7 @@ npm run dearbyte -- --proactive off
 
 聊天历史、记忆、摘要和设置保存在本地 `data/`。长期记忆默认关闭，聊天历史仍会保存。开启记忆后，模型提出的事实必须有用户原话作为依据，才会被保存。
 
-生成回复会将相关上下文发送给 DeepSeek；开启记忆时，还会有记忆提取与摘要相关的模型调用。图片只用于当前轮次。默认历史保留 30 天；开启记忆时，较早的聊天先纳入摘要再删除。
+生成回复会将相关上下文发送给你配置的模型服务商（默认 DeepSeek）；开启记忆时，还会有记忆提取与摘要相关的模型调用。图片只用于当前轮次。默认历史保留 30 天；开启记忆时，较早的聊天先纳入摘要再删除。
 
 删除本地数据不会删除微信中已经发送的消息，也不会删除服务商可能保留的数据。小拜无法代替用户联系紧急服务。
 
