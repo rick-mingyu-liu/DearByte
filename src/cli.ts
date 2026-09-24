@@ -9,6 +9,7 @@ import { Companion } from "./companion/companion.ts";
 import { COMMON_HELP, describeEvent, dim, log, runSharedCommand, sleep } from "./console.ts";
 import { loadPromptParts } from "./companion/prompt.ts";
 import { loadConfig, ROOT } from "./config.ts";
+import { applyRetention } from "./memory/summary.ts";
 import { ImageError, loadImage, parseImageArgs } from "./media/images.ts";
 import { DeepSeekModel } from "./model/deepseek.ts";
 import { FakeModel } from "./model/fake.ts";
@@ -31,6 +32,8 @@ async function main() {
   let held: string[] | null = null;
   const model: ChatModel = fake ? new FakeModel() : new DeepSeekModel(config.apiKey!, config.model);
   const store = Store.open(config.dbPath);
+  const pruned = applyRetention(store, config.historyDays);
+  if (pruned) log(`删除了 ${pruned} 条超过 ${config.historyDays} 天的聊天记录（已并进摘要的部分）`);
   const companion = new Companion({
     store,
     model,

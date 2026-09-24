@@ -22,6 +22,7 @@ import { localDate } from "./companion/time.ts";
 import { systemNotifier, Watchdog } from "./alerts.ts";
 import { filmChannelLine, filmCompanionLine } from "./film.ts";
 import { loadConfig, ROOT } from "./config.ts";
+import { applyRetention } from "./memory/summary.ts";
 import { loadContacts, saveContacts } from "./contacts.ts";
 import { COMMON_HELP, describeEvent, describeReplyEvent, log, runSharedCommand } from "./console.ts";
 import { DeepSeekModel } from "./model/deepseek.ts";
@@ -194,8 +195,16 @@ async function main() {
   let closing: Promise<void> | undefined;
   // Once a minute: should 小拜 write first? The plan's rules keep it rare.
   let ticking: Promise<void> | null = null;
+  let retainedOn = "";
   const tick = async () => {
     const now = new Date();
+    // Once a day (and at start): drop chat history past the retention window.
+    if (retainedOn !== localDate(now, config.timeZone)) {
+      retainedOn = localDate(now, config.timeZone);
+      const pruned = applyRetention(store, config.historyDays, now);
+      if (pruned) log(`删除了 ${pruned} 条超过 ${config.historyDays} 天的聊天记录（已并进摘要的部分）`);
+    }
+    if (!proactiveEnabled() || channel.mode === "draft") return;
     const state = dayState(readProactiveState(store), localDate(now, config.timeZone), Math.random);
     store.setSetting(PROACTIVE_STATE_SETTING, JSON.stringify(state));
     const plan = planProactive({
@@ -210,12 +219,13 @@ async function main() {
     store.setSetting(PROACTIVE_STATE_SETTING, JSON.stringify(recordAttempt(state, plan.key, result, now)));
   };
   const runTick = () => {
-    if (ticking || closing || !proactiveEnabled() || channel.mode === "draft") return;
+    if (ticking || closing) return;
     ticking = tick()
       .catch((err: Error) => log(`主动消息出错：${err.message}`))
       .finally(() => (ticking = null));
   };
   const ticker = setInterval(runTick, PROACTIVE_TICK_MS);
+  runTick(); // retention at start; a proactive plan can't fire before the chat is in sync
   const watching = setInterval(() => watchdog.check(channel.health), 5_000);
   // Keep the Mac from idle-sleeping while 小拜 runs; ends with this process.
   // The display may still sleep: reading WeChat doesn't need it.

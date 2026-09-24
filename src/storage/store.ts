@@ -151,6 +151,18 @@ export class Store {
     this.db.prepare("DELETE FROM settings WHERE key IN ('summary_text')").run();
   }
 
+  /**
+   * Deletes messages written before `before` (ISO). With `upToId`, only those
+   * up to that id, i.e. already folded into the summary. Facts stay.
+   */
+  pruneMessages(before: string, upToId: number | null): number {
+    const result =
+      upToId === null
+        ? this.db.prepare("DELETE FROM messages WHERE created_at < ?").run(before)
+        : this.db.prepare("DELETE FROM messages WHERE created_at < ? AND id <= ?").run(before, upToId);
+    return Number(result.changes);
+  }
+
   /** Several settings in one transaction. */
   setSettings(values: Record<string, string>): void {
     this.db.exec("BEGIN");

@@ -77,3 +77,21 @@ test("the summary appears in the prompt only with memory on", () => {
   const off = buildSystemPrompt(parts, { now, timeZone: "UTC", memoryEnabled: false, facts: [], crisis: false, summary: "上周聊过搬家" });
   expect(off).not.toContain("上周聊过搬家");
 });
+
+test("retention deletes old history, but with memory on only what the summary already holds", async () => {
+  const { applyRetention } = await import("../src/memory/summary.ts");
+  const store = Store.open(":memory:");
+  const day = (d: number) => new Date(Date.UTC(2026, 8, d)).toISOString();
+  for (const d of [1, 2, 3]) store.addMessage("user", `九月${d}日`, { createdAt: day(d) });
+  store.addMessage("user", "今天", { createdAt: day(24) });
+  const now = new Date(day(25));
+
+  expect(applyRetention(store, 0, now)).toBe(0); // 0 keeps everything
+  store.setMemoryEnabled(true);
+  expect(applyRetention(store, 22, now)).toBe(0); // nothing folded yet
+  store.setSetting(SUMMARY_UPTO_SETTING, "2");
+  expect(applyRetention(store, 23, now)).toBe(1); // only 1 Sep is older than 23 days, and it is folded
+  store.setMemoryEnabled(false);
+  expect(applyRetention(store, 20, now)).toBe(2); // memory off: everything older goes
+  expect(store.recentMessages(10).map((m) => m.text)).toEqual(["今天"]);
+});

@@ -72,3 +72,15 @@ export async function updateSummary(opts: { model: ChatModel; store: Store; wind
   store.setSettings({ [SUMMARY_SETTING]: summary, [SUMMARY_UPTO_SETTING]: String(aged.at(-1)!.id) });
   return { folded: aged.length, chars: [...summary].length };
 }
+
+/**
+ * Deletes chat history older than `days` (0 keeps everything). With memory on,
+ * only messages already folded into the summary go, so nothing is lost that
+ * the summary hasn't kept; with memory off there is no summary to wait for.
+ */
+export function applyRetention(store: Store, days: number, now = new Date()): number {
+  if (days <= 0) return 0;
+  const before = new Date(now.getTime() - days * 86_400_000).toISOString();
+  const upto = store.memoryEnabled() ? Number(store.getSetting(SUMMARY_UPTO_SETTING) ?? 0) : null;
+  return store.pruneMessages(before, upto);
+}

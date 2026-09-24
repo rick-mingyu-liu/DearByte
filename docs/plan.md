@@ -71,7 +71,7 @@ Record the results in `docs/design/wechat-transport.md`.
 - [ ] **Forgetting:** `/memory forget` should also remove the fact from recent history sent to the model, not only from the fact table.
 - [ ] **Memory claims:** 小拜 sometimes says 「我都记着」 when memory is off. Tighten the persona and add a bake-off case.
 - [ ] **Crisis detection:** add a cheap model-based check next to the keywords. Keep the keywords as a fallback.
-- [ ] **History retention:** make it configurable, disclose it, and default to 30 days.
+- [x] **History retention** (2026-09-24): `COMPANION_HISTORY_DAYS`, default 30; with memory on, only messages already in the summary are deleted. Disclosed in the README.
 
 ## Milestone 4: only if selling
 

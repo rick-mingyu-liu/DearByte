@@ -107,7 +107,8 @@ message ─► SQLite (history) ─► prompt ─► deepseek-flash ─► check
 | `COMPANION_DB` | `data/companion.sqlite` |
 | `COMPANION_ALERT_URL` | Optional. An ntfy topic URL for alerts on your phone. |
 | `COMPANION_TZ` | The Mac's time zone. Used for 小拜's sense of time, dates like 下周六, and when it may write first. Set it to the chat partner's zone (e.g. `Asia/Shanghai`) if the Mac is elsewhere, or 小拜 may write to them at night. |
-| `COMPANION_HISTORY_MESSAGES` | `40` (the last 20 turns, verbatim) |
+| `COMPANION_HISTORY_MESSAGES` | `40` (the last 20 turns, verbatim). Older messages are folded into a rolling summary when memory is on. |
+| `COMPANION_HISTORY_DAYS` | `30`. Chat history older than this is deleted, once it's in the summary (memory on) or right away (memory off). `0` keeps everything. |
 | `COMPANION_WECHAT_MEDIA_DIR` | unset. The `…/<小拜 account>/Message/MessageTemp/<chat>/Image` folder inside WeChat's container; needed for photos. |
 
 ## Development
@@ -143,6 +144,6 @@ docs/                    provenance and design notes
 
 ## Data and privacy
 
-Everything is stored locally in `data/` (gitignored). Each message is sent to DeepSeek to generate the reply; photos are sent only for the current turn. In WeChat mode, the runner reads only the bound chat and its image folder, and Tencent carries the messages as it does for any chat. Deleting local data doesn't delete messages already sent in WeChat, or anything DeepSeek keeps on its side.
+Everything is stored locally in `data/` (gitignored): chat history (kept 30 days by default, see `COMPANION_HISTORY_DAYS`), memories, a rolling summary of older chat, and settings. Each message is sent to DeepSeek to generate the reply; photos are sent only for the current turn. In WeChat mode, the runner reads only the chat listed in `data/contacts.json` and its image folder, and Tencent carries the messages as it does for any chat. Deleting local data doesn't delete messages already sent in WeChat, or anything DeepSeek keeps on its side.
 
 Persona ideas are adapted from [狗头军师](https://github.com/shengjidaguai-china/goutoujunshi) (MIT). See [docs/upstream-provenance.md](docs/upstream-provenance.md).

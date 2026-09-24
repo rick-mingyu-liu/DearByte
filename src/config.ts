@@ -9,6 +9,8 @@ export type Config = {
   dbPath: string;
   timeZone: string;
   historyMessages: number;
+  /** Chat history older than this many days is deleted (0 keeps it all). */
+  historyDays: number;
   /** Folder where WeChat for Mac saves photos received in 小拜's chat. */
   wechatMediaDir: string | null;
   /** Optional push URL (e.g. https://ntfy.sh/<topic>) for alerts when 小拜 gets stuck. */
@@ -34,6 +36,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     dbPath: merged.COMPANION_DB || join(ROOT, "data/companion.sqlite"),
     timeZone: merged.COMPANION_TZ || Intl.DateTimeFormat().resolvedOptions().timeZone,
     historyMessages: Number(merged.COMPANION_HISTORY_MESSAGES || 40),
+    historyDays: Number(merged.COMPANION_HISTORY_DAYS ?? 30),
     wechatMediaDir: merged.COMPANION_WECHAT_MEDIA_DIR || null,
     alertUrl: merged.COMPANION_ALERT_URL || null,
   };
