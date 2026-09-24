@@ -29,6 +29,8 @@ export class DesktopChannel {
   /** Rows from the last time the bound chat was open. */
   private seen: string[] | null = null;
   private lastStatus = "";
+  /** The bound chat's name as WeChat showed it last; sending checks against it. */
+  private openName: string | null = null;
   /** Nicknames seen sending in the bound chat; more than one means a group. */
   private readonly senders = new Set<string>();
   private readonly reportedUnknown = new Set<string>();
@@ -40,8 +42,8 @@ export class DesktopChannel {
     private readonly deps: {
       ui: WechatUi;
       companion: Companion;
-      /** The chat 小拜 answers, as WeChat shows its name. */
-      chat: string;
+      /** Names the chat 小拜 answers may show in WeChat (a remark, a nickname, old names). */
+      names: string[];
       photos: PhotoFolder | null;
       mode: Mode;
       onEvent?: (event: DesktopEvent) => void;
@@ -121,11 +123,13 @@ export class DesktopChannel {
 
   /** Handles one snapshot. Public for tests. */
   poll(snapshot: { chat: string; rows: string[] }): void {
-    const { chat } = this.deps;
-    if (snapshot.chat !== chat) {
-      this.status(`微信当前打开的是「${snapshot.chat || "（无）"}」，不是「${chat}」；切回去之前不会回复`);
+    const { names } = this.deps;
+    const chat = snapshot.chat;
+    if (!names.includes(chat)) {
+      this.status(`微信当前打开的是「${chat || "（无）"}」，不是「${names.join("」「")}」；切回去之前不会回复`);
       return;
     }
+    this.openName = chat;
     if (this.seen === null) {
       this.seen = snapshot.rows;
       this.status(`已连接「${chat}」，从现在起的新消息会${this.deps.mode === "draft" ? "生成草稿（不发送）" : "自动回复"}`);
@@ -189,7 +193,7 @@ export class DesktopChannel {
     if (!bubble) return "sent";
     for (let attempt = 1; ; attempt++) {
       try {
-        await this.deps.ui.send(this.deps.chat, bubble);
+        await this.deps.ui.send(this.openName ?? this.deps.names[0], bubble);
         return "sent";
       } catch (err) {
         const code = err instanceof HelperError ? err.code : "";

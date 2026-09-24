@@ -24,8 +24,8 @@ You need:
 - **The chat with you open** in WeChat's main window, scrolled to the bottom. The window can sit on another desktop (Space), but don't close it, and don't open chats in separate windows.
 
 ```bash
-npm run dearbyte -- --chat 张三   # first run: bind the chat to answer (the name shown at the top of the chat)
-npm run dearbyte                  # later runs: the bound chat is remembered
+npm run dearbyte -- --chat 张三   # first run: creates data/contacts.json for this chat (the name shown at the top of the chat)
+npm run dearbyte                  # later runs read data/contacts.json
 npm run dearbyte -- --draft       # generate replies in the terminal without sending them
 npm run dearbyte -- --fake        # no model calls; replies are labelled fake
 npm run dearbyte -- --memory on   # turn long-term memory on (or off); remembered
@@ -42,7 +42,8 @@ Then chat with 小拜 from your phone. The terminal shows each message, each bub
 | `/status`, `/help`, `/quit` | Show status, show help, quit |
 
 How it behaves:
-- **Who gets replies:** only the bound one-to-one chat. If you open another chat on the Mac, 小拜 waits until it's back. Messages already in the chat when it starts are never answered. If a second person speaks in the chat (a group), it pauses.
+- **Who gets replies:** only the one-to-one chat listed in `data/contacts.json`. The file is gitignored because it holds real names; `contacts.example.json` shows the format. List every name WeChat may show at the top of that chat (the remark, the nickname, old names), so renaming the chat doesn't stop replies. Edit the file and restart to change it. Only one contact is supported for now: several would need separate history and memory per person, and a way to switch chats.
+- **Other chats:** if you open another chat on the Mac, 小拜 waits until it's back. Messages already in the chat when it starts are never answered. If a second person speaks in the chat (a group), it pauses.
 - **Bursts:** several quick messages (within about 1.5 s) become one turn.
 - **Timing:** the first bubble comes 1.5–3.5 s after the message at the earliest, as if reading it; later bubbles take about as long as typing them, with some jitter.
 - **Photos:** read from WeChat's local image folder for that chat (`COMPANION_WECHAT_MEDIA_DIR`). Without it, 小拜 is told it can't see the picture. Stickers, voice, video and files are described to 小拜 as things it can't open.

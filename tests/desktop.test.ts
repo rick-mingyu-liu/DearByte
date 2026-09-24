@@ -116,7 +116,9 @@ test("falls back to the thumbnail when the full-size photo never arrives", async
 
 // --- Channel ---------------------------------------------------------------
 
-function setup(opts: { responses?: ConstructorParameters<typeof FakeModel>[0]; mode?: Mode; sendErrors?: string[]; photos?: PhotoFolder } = {}) {
+function setup(opts: { responses?: ConstructorParameters<typeof FakeModel>[0]; mode?: Mode; sendErrors?: string[]; photos?: PhotoFolder; names?: string[] } = {}) {
+  const names = opts.names ?? [CHAT];
+  const sentTo: string[] = [];
   const store = Store.open(":memory:");
   const model = new FakeModel(opts.responses ?? []);
   const companion = new Companion({ store, model, parts: loadPromptParts(ROOT), timeZone: "Asia/Shanghai", historyMessages: 40 });
@@ -125,7 +127,8 @@ function setup(opts: { responses?: ConstructorParameters<typeof FakeModel>[0]; m
   const ui: WechatUi = {
     snapshot: async () => ({ chat: CHAT, rows: [], draft: false }),
     send: async (chat, text) => {
-      expect(chat).toBe(CHAT);
+      expect(names).toContain(chat);
+      sentTo.push(chat);
       const code = errors.shift();
       if (code) throw new HelperError(code);
       sent.push(text);
@@ -136,13 +139,13 @@ function setup(opts: { responses?: ConstructorParameters<typeof FakeModel>[0]; m
   const channel = new DesktopChannel({
     ui,
     companion,
-    chat: CHAT,
+    names,
     photos: opts.photos ?? null,
     mode: opts.mode ?? "auto",
     onEvent: (e) => events.push(e),
     sleep: async () => {},
   });
-  return { store, model, channel, sent, events };
+  return { store, model, channel, sent, sentTo, events };
 }
 
 test("never answers what was already in the chat, then answers new messages", async () => {
@@ -343,4 +346,21 @@ test("settle waits for memory work started by the last turn", async () => {
   channel.poll({ chat: CHAT, rows: [said("我下周三面试")] });
   await channel.settle();
   expect(store.activeFacts().map((f) => f.key)).toEqual(["interview"]);
+});
+
+test("a chat renamed while running (a remark removed) keeps getting replies under any of its names", async () => {
+  const { channel, sent, sentTo } = setup({ names: [CHAT, SENDER], responses: [reply("在")] });
+  channel.poll({ chat: CHAT, rows: [said("早")] });
+  channel.poll({ chat: SENDER, rows: [said("早"), said("在吗")] });
+  await channel.settle();
+  expect(sent).toEqual(["在"]);
+  expect(sentTo).toEqual([SENDER]); // the helper checks against the name shown now
+});
+
+test("a chat with a name not in the list is never answered", async () => {
+  const { channel, sent } = setup({ names: [CHAT] });
+  channel.poll({ chat: CHAT, rows: [said("早")] });
+  channel.poll({ chat: "别人", rows: [said("早"), said("在吗")] });
+  await channel.settle();
+  expect(sent).toEqual([]);
 });

@@ -3,11 +3,12 @@
 //
 //   npm run dearbyte                 # answer the bound chat automatically
 //   npm run dearbyte -- --draft      # show replies in the terminal, never send
-//   npm run dearbyte -- --chat 张三   # bind (or rebind) the chat to answer
+//   npm run dearbyte -- --chat 张三   # first run: create data/contacts.json for this chat
 //   npm run dearbyte -- --fake       # no model calls; replies are labelled fake
 //   npm run dearbyte -- --memory on  # long-term memory on (or off); saved
 //   npm run dearbyte -- --proactive off  # 小拜 never writes first (on by default); saved
 
+import { join } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { DesktopChannel, type DesktopEvent } from "./channels/desktop/channel.ts";
 import { DesktopHelper, HelperError } from "./channels/desktop/helper.ts";
@@ -17,13 +18,15 @@ import { dayState, planProactive, type ProactiveState } from "./companion/proact
 import { loadPromptParts } from "./companion/prompt.ts";
 import { localDate } from "./companion/time.ts";
 import { loadConfig, ROOT } from "./config.ts";
+import { loadContacts, saveContacts } from "./contacts.ts";
 import { COMMON_HELP, describeEvent, describeReplyEvent, log, runSharedCommand } from "./console.ts";
 import { DeepSeekModel } from "./model/deepseek.ts";
 import { FakeModel } from "./model/fake.ts";
 import type { ChatModel } from "./model/provider.ts";
 import { Store } from "./storage/store.ts";
 
-const CHAT_SETTING = "wechat_chat";
+/** Where the chat name was saved before data/contacts.json; read once to migrate. */
+const LEGACY_CHAT_SETTING = "wechat_chat";
 const PROACTIVE_SETTING = "proactive_enabled";
 const PROACTIVE_STATE = "proactive_state";
 /** How often to consider writing first. */
@@ -61,39 +64,55 @@ async function main() {
 
   const ui = new DesktopHelper();
   const store = Store.open(config.dbPath);
-  // Bind the chat to answer. Binding is always explicit, so 小拜 never starts
-  // answering whichever chat happened to be open.
+  // Who to answer comes from data/contacts.json, so 小拜 never starts answering
+  // whichever chat happened to be open.
+  const contactsPath = join(ROOT, "data/contacts.json");
+  const fail = (message: string): never => {
+    console.error(message);
+    ui.close();
+    store.close();
+    process.exit(1);
+  };
+  let contacts;
+  try {
+    contacts = loadContacts(contactsPath);
+  } catch (err) {
+    fail((err as Error).message);
+  }
   const requested = argValue(argv, "--chat");
-  const chat = requested ?? store.getSetting(CHAT_SETTING);
+  if (contacts && requested && !contacts.some((c) => c.names.includes(requested))) {
+    fail(`data/contacts.json 已经有了。要改名字或加名字，直接编辑这个文件（格式见 contacts.example.json），然后重启。`);
+  }
+  if (!contacts) {
+    const first = requested ?? store.getSetting(LEGACY_CHAT_SETTING);
+    if (first) {
+      contacts = [{ id: "me", names: [first] }];
+      saveContacts(contactsPath, contacts);
+      log(`已创建 data/contacts.json：小拜只回复「${first}」。改名或加名字就编辑这个文件`);
+    }
+  }
 
   let open = { chat: "" };
   try {
     open = await ui.snapshot();
   } catch (err) {
-    // With a bound chat, wait for it like the poll loop does. Binding needs
-    // WeChat now, and a missing permission won't fix itself.
-    if (!chat || (err instanceof HelperError && err.code === "no_accessibility_permission")) {
-      console.error(`连不上微信：${(err as Error).message}`);
-      ui.close();
-      store.close();
-      process.exit(1);
+    // With a contact set, wait for the chat like the poll loop does. Setting
+    // one up needs WeChat now, and a missing permission won't fix itself.
+    if (!contacts || (err instanceof HelperError && err.code === "no_accessibility_permission")) {
+      fail(`连不上微信：${(err as Error).message}`);
     }
   }
 
-  if (!chat) {
-    console.error(
+  if (!contacts) {
+    fail(
       open.chat
-        ? `还没绑定聊天。微信当前打开的是「${open.chat}」；确认是和你的一对一聊天后，运行：\n  npm run dearbyte -- --chat ${open.chat}`
-        : "还没绑定聊天。先在 Mac 微信里点开和你的聊天，再运行 npm run dearbyte -- --chat <聊天名字>",
+        ? `还没设置聊天对象。微信当前打开的是「${open.chat}」；确认是和你的一对一聊天后，运行：\n  npm run dearbyte -- --chat ${open.chat}`
+        : "还没设置聊天对象。先在 Mac 微信里点开和你的聊天，再运行 npm run dearbyte -- --chat <聊天名字>",
     );
-    ui.close();
-    store.close();
-    process.exit(1);
   }
-  if (chat !== store.getSetting(CHAT_SETTING)) {
-    store.setSetting(CHAT_SETTING, chat);
-    log(`绑定聊天「${chat}」：小拜只回复这个聊天。换聊天用 --chat <名字>`);
-  }
+  // Each contact needs its own history and memory before 小拜 can answer several people.
+  if (contacts!.length > 1) fail("data/contacts.json 里有多个联系人；现在只支持一个（每人单独的聊天记录和记忆还没做）");
+  const names = contacts![0].names;
 
   for (const [flag, apply] of [
     ["--memory", (on: boolean) => store.setMemoryEnabled(on)],
@@ -129,7 +148,7 @@ async function main() {
   const channel = new DesktopChannel({
     ui,
     companion,
-    chat,
+    names,
     photos,
     mode: argv.includes("--draft") ? "draft" : "auto",
     onEvent: (e) => {
@@ -144,7 +163,7 @@ async function main() {
     log(
       `模型 ${model.name}${fake ? "（假模型，会发出标明是假的回复）" : ""} · ${store.messageCount()} 条聊天记录 · ` +
         `长期记忆${store.memoryEnabled() ? `开启（${store.activeFacts().length} 条）` : "关闭"} · ` +
-        `主动消息${proactiveEnabled() ? "开启" : "关闭"} · 微信「${chat}」· ${channel.mode === "draft" ? "草稿模式（不发送）" : channel.paused ? "已暂停" : "自动回复"}`,
+        `主动消息${proactiveEnabled() ? "开启" : "关闭"} · 微信「${names.join("」「")}」· ${channel.mode === "draft" ? "草稿模式（不发送）" : channel.paused ? "已暂停" : "自动回复"}`,
     );
   status();
 
