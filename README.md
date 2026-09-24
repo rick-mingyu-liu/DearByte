@@ -27,6 +27,7 @@ You need:
 npm run dearbyte -- --chat 张三   # first run: creates data/contacts.json for this chat (the name shown at the top of the chat)
 npm run dearbyte                  # later runs read data/contacts.json
 npm run dearbyte -- --draft       # generate replies in the terminal without sending them
+npm run dearbyte -- --film        # a clean log for the camera: the conversation, 小拜 writing first, and what it remembers
 npm run dearbyte -- --fake        # no model calls; replies are labelled fake
 npm run dearbyte -- --memory on   # turn long-term memory on (or off); remembered
 npm run dearbyte -- --proactive off  # 小拜 never writes first; on by default, remembered

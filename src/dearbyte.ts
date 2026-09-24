@@ -3,6 +3,7 @@
 //
 //   npm run dearbyte                 # answer the bound chat automatically
 //   npm run dearbyte -- --draft      # show replies in the terminal, never send
+//   npm run dearbyte -- --film       # a clean log to show on camera
 //   npm run dearbyte -- --chat 张三   # first run: create data/contacts.json for this chat
 //   npm run dearbyte -- --fake       # no model calls; replies are labelled fake
 //   npm run dearbyte -- --memory on  # long-term memory on (or off); saved
@@ -19,6 +20,7 @@ import { dayState, planProactive, type ProactiveState } from "./companion/proact
 import { loadPromptParts } from "./companion/prompt.ts";
 import { localDate } from "./companion/time.ts";
 import { systemNotifier, Watchdog } from "./alerts.ts";
+import { filmChannelLine, filmCompanionLine } from "./film.ts";
 import { loadConfig, ROOT } from "./config.ts";
 import { loadContacts, saveContacts } from "./contacts.ts";
 import { COMMON_HELP, describeEvent, describeReplyEvent, log, runSharedCommand } from "./console.ts";
@@ -137,6 +139,10 @@ async function main() {
     photos.markExistingSeen();
   } else log("没有设置 COMPANION_WECHAT_MEDIA_DIR：收到图片时小拜会说看不到");
 
+  // The filming log: a clean screen, then only the conversation and memories.
+  const film = argv.includes("--film");
+  if (film && process.stdout.isTTY) console.clear();
+
   const model: ChatModel = fake ? new FakeModel() : new DeepSeekModel(config.apiKey!, config.model);
   const companion = new Companion({
     store,
@@ -145,8 +151,8 @@ async function main() {
     timeZone: config.timeZone,
     historyMessages: config.historyMessages,
     onEvent: (e) => {
-      const line = describeEvent(e);
-      if (line) log(line);
+      const line = film ? filmCompanionLine(e, names[0]) : describeEvent(e);
+      if (line) film ? console.log(line) : log(line);
     },
   });
   const watchdog = new Watchdog({ notify: systemNotifier(config.alertUrl, log) });
@@ -158,15 +164,17 @@ async function main() {
     mode: argv.includes("--draft") ? "draft" : "auto",
     onEvent: (e) => {
       if (e.type === "send_failed") watchdog.sendFailed(e.message);
-      const line = describeDesktopEvent(e);
+      const line = film ? filmChannelLine(e, names[0]) : describeDesktopEvent(e);
       if (!line) return;
-      if (e.type === "inbound" || e.type === "sent" || e.type === "drafted") console.log(line);
+      if (film || e.type === "inbound" || e.type === "sent" || e.type === "drafted") console.log(line);
       else log(line);
     },
   });
 
   const status = () =>
-    log(
+    film
+      ? console.log(`💗 小拜 · DearByte   ${store.memoryEnabled() ? `记得 ${store.activeFacts().length} 件关于你的事` : ""}\n`)
+      : log(
       `模型 ${model.name}${fake ? "（假模型，会发出标明是假的回复）" : ""} · ${store.messageCount()} 条聊天记录 · ` +
         `长期记忆${store.memoryEnabled() ? `开启（${store.activeFacts().length} 条）` : "关闭"} · ` +
         `主动消息${proactiveEnabled() ? "开启" : "关闭"} · 微信「${names.join("」「")}」· ${channel.mode === "draft" ? "草稿模式（不发送）" : channel.paused ? "已暂停" : "自动回复"}`,
@@ -232,10 +240,10 @@ async function main() {
   process.on("SIGINT", interrupt).on("SIGTERM", interrupt);
 
   if (!rl) {
-    log("没有交互终端，不接受命令；Ctrl+C 或 SIGTERM 退出");
+    if (!film) log("没有交互终端，不接受命令；Ctrl+C 或 SIGTERM 退出");
     await running;
   } else {
-    log("输入 /help 查看命令，/quit 退出");
+    if (!film) log("输入 /help 查看命令，/quit 退出");
     const settle = () => channel.settle();
     for await (const raw of rl) {
       const line = raw.trim();

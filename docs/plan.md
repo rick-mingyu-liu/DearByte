@@ -53,7 +53,8 @@ Record the results in `docs/design/wechat-transport.md`.
 ## Milestone 2: ready to film
 
 - [ ] Put real photos in `data/test-images/` (`cat.jpg`, `food.jpg`) and run `npm run bakeoff`. Tune the persona until photo replies feel natural.
-- [ ] Add a clean "filming" log mode: short, readable Chinese lines with no token counts. Keep the detailed mode for development.
+- [x] Add a clean "filming" log mode (`--film`, 2026-09-24): the conversation, 小拜 writing first, and 「🧠 记住了」 lines; no token counts.
+- [x] Alerts when 小拜 goes quiet (macOS notification, optional ntfy push), and keep the Mac awake while running (2026-09-24).
 - [ ] Rehearse the scene: turn memory on a few days before filming, so continuity (「你上次说的那只猫」) appears naturally rather than being staged.
 - [ ] Set 小拜's avatar, nickname and signature on the test account, and make sure your phone shows 小拜 (not an old remark) in the chat list.
 - [ ] Before each filming session, check WeChat for Mac is still 3.8.4 and hasn't auto-updated.
