@@ -28,6 +28,12 @@ function readDotEnv(path: string): Record<string, string> {
   return out;
 }
 
+/** A number ≥ 0 from the environment, or the default when it's missing or not a number. */
+function nonNegative(value: string | undefined, fallback: number): number {
+  const n = Number(value);
+  return value !== undefined && value.trim() !== "" && Number.isFinite(n) && n >= 0 ? n : fallback;
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const merged = { ...readDotEnv(join(ROOT, ".env")), ...env };
   return {
@@ -36,7 +42,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     dbPath: merged.COMPANION_DB || join(ROOT, "data/companion.sqlite"),
     timeZone: merged.COMPANION_TZ || Intl.DateTimeFormat().resolvedOptions().timeZone,
     historyMessages: Number(merged.COMPANION_HISTORY_MESSAGES || 40),
-    historyDays: Number(merged.COMPANION_HISTORY_DAYS ?? 30),
+    historyDays: nonNegative(merged.COMPANION_HISTORY_DAYS, 30),
     wechatMediaDir: merged.COMPANION_WECHAT_MEDIA_DIR || null,
     alertUrl: merged.COMPANION_ALERT_URL || null,
   };

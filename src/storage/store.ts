@@ -3,15 +3,20 @@ import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { Fact, FactCandidate, Role, StoredMessage } from "../domain.ts";
 
-const SCHEMA = `
+// AUTOINCREMENT: ids are never reused, even after history is emptied, so the
+// summary's position (an id) can't end up pointing past newer messages.
+const MESSAGES_TABLE = `
 CREATE TABLE IF NOT EXISTS messages (
-  id INTEGER PRIMARY KEY,
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
   role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
   text TEXT NOT NULL,
   bubbles TEXT,
   has_image INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL
-);
+);`;
+
+const SCHEMA = `
+${MESSAGES_TABLE}
 
 -- One row per key. A forgotten fact keeps its key and forgotten_at (value and
 -- evidence are wiped) so extraction cannot resurrect it from older messages.
@@ -34,6 +39,27 @@ CREATE TABLE IF NOT EXISTS settings (
   value TEXT NOT NULL
 );
 `;
+
+/**
+ * Databases made before 2026-09-24 have messages without AUTOINCREMENT. Rebuild
+ * the table once, keeping every id; facts point at messages by id and still do.
+ * Foreign keys must be off while the old table is dropped.
+ */
+function migrateMessagesToAutoincrement(db: DatabaseSync): void {
+  const row = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'messages'").get() as { sql: string } | undefined;
+  if (!row || row.sql.includes("AUTOINCREMENT")) return;
+  db.exec("BEGIN");
+  try {
+    db.exec(MESSAGES_TABLE.replace("CREATE TABLE IF NOT EXISTS messages", "CREATE TABLE messages_new"));
+    db.exec("INSERT INTO messages_new SELECT id, role, text, bubbles, has_image, created_at FROM messages");
+    db.exec("DROP TABLE messages");
+    db.exec("ALTER TABLE messages_new RENAME TO messages");
+    db.exec("COMMIT");
+  } catch (err) {
+    db.exec("ROLLBACK");
+    throw err;
+  }
+}
 
 type MessageRow = {
   id: number;
@@ -87,7 +113,11 @@ export class Store {
   static open(path: string): Store {
     if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true });
     const db = new DatabaseSync(path);
-    db.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;");
+    // node:sqlite turns foreign keys on by default; the migration needs them off,
+    // or dropping the old table would null every fact's source link.
+    db.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = OFF;");
+    migrateMessagesToAutoincrement(db);
+    db.exec("PRAGMA foreign_keys = ON;");
     db.exec(SCHEMA);
     return new Store(db);
   }
@@ -138,17 +168,48 @@ export class Store {
 
   /** Deletes chat history and its rolling summary. Facts stay (their source link becomes null). */
   clearHistory(): number {
-    // Ids restart once the table is empty, so the summary's position goes too.
     this.db.prepare("DELETE FROM settings WHERE key IN ('summary_text', 'summary_upto')").run();
+    this.bumpSummaryRev();
     return Number(this.db.prepare("DELETE FROM messages").run().changes);
   }
 
   /**
-   * Drops the rolling summary. The summary is prose that may mention anything,
-   * so forgetting a fact drops it too; later messages rebuild it.
+   * Drops the rolling summary after a fact is forgotten. The summary is prose
+   * and may mention the fact, and so may messages it hasn't folded yet, so its
+   * position jumps to the newest message: those are never folded in. The
+   * recent window still shows them verbatim until they age out.
    */
   clearSummary(): void {
-    this.db.prepare("DELETE FROM settings WHERE key IN ('summary_text')").run();
+    const max = (this.db.prepare("SELECT MAX(id) AS id FROM messages").get() as { id: number | null }).id ?? 0;
+    this.db.prepare("DELETE FROM settings WHERE key = 'summary_text'").run();
+    this.setSetting("summary_upto", String(Math.max(max, Number(this.getSetting("summary_upto") ?? 0))));
+    this.bumpSummaryRev();
+  }
+
+  /** Changes whenever the summary is cleared, so a fold already in flight knows not to write. */
+  summaryRev(): string {
+    return this.getSetting("summary_rev") ?? "0";
+  }
+
+  private bumpSummaryRev(): void {
+    this.setSetting("summary_rev", String(Number(this.summaryRev()) + 1));
+  }
+
+  /** Writes `values` only if the summary wasn't cleared since `rev` was read. Returns whether it wrote. */
+  setSummaryIf(rev: string, values: Record<string, string>): boolean {
+    this.db.exec("BEGIN");
+    try {
+      if (this.summaryRev() !== rev) {
+        this.db.exec("ROLLBACK");
+        return false;
+      }
+      for (const [k, v] of Object.entries(values)) this.setSetting(k, v);
+      this.db.exec("COMMIT");
+      return true;
+    } catch (err) {
+      this.db.exec("ROLLBACK");
+      throw err;
+    }
   }
 
   /**

@@ -97,6 +97,9 @@ test("safety prompt is added only for crisis messages", () => {
   expect(looksLikeCrisis("想死我了")).toBe(false);
   expect(looksLikeCrisis("我好想死")).toBe(true);
   expect(looksLikeCrisis("想死了")).toBe(true);
+  expect(looksLikeCrisis("我好想死你懂吗")).toBe(true); // only the idiom is excused
+  expect(looksLikeCrisis("想死你们别管我")).toBe(true);
+  expect(looksLikeCrisis("想死你啦")).toBe(false);
   const system = buildSystemPrompt(parts, { now, timeZone: "Asia/Shanghai", memoryEnabled: false, facts: [], crisis: true });
   expect(system).toContain("12356");
 });

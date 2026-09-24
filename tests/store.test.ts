@@ -71,3 +71,24 @@ test("clearing history keeps facts but drops their source link", () => {
   expect(store.messageCount()).toBe(0);
   expect(store.activeFacts()[0].sourceMessageId).toBeNull();
 });
+
+test("an old database is migrated to never reuse message ids, keeping ids and fact links", async () => {
+  const { mkdtempSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { DatabaseSync } = await import("node:sqlite");
+  const path = join(mkdtempSync(join(tmpdir(), "db-")), "old.sqlite");
+  const old = new DatabaseSync(path);
+  old.exec(`CREATE TABLE messages (id INTEGER PRIMARY KEY, role TEXT NOT NULL CHECK (role IN ('user', 'assistant')), text TEXT NOT NULL, bubbles TEXT, has_image INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL);
+    CREATE TABLE facts (id INTEGER PRIMARY KEY, category TEXT NOT NULL, key TEXT NOT NULL UNIQUE, value TEXT NOT NULL, event_date TEXT, evidence TEXT NOT NULL, source_message_id INTEGER REFERENCES messages(id) ON DELETE SET NULL, status TEXT NOT NULL DEFAULT 'active', forgotten_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+    INSERT INTO messages VALUES (7, 'user', '我养了猫', NULL, 0, '2026-09-01T00:00:00Z');
+    INSERT INTO facts (category, key, value, evidence, source_message_id, created_at, updated_at) VALUES ('pet', 'cat', '用户养了猫', '我养了猫', 7, 'x', 'x');`);
+  old.close();
+
+  const store = Store.open(path);
+  expect(store.activeFacts()[0].sourceMessageId).toBe(7);
+  expect(store.recentMessages(5).map((m) => m.id)).toEqual([7]);
+  store.clearHistory();
+  expect(store.addMessage("user", "新的").id).toBe(8); // not 1 again
+  store.close();
+});

@@ -17,14 +17,14 @@ const PROMPT = `判断用户这条消息有没有人身安全风险：想死、�
 const ResultSchema = z.object({ risk: z.boolean() });
 
 /** True when the model thinks the message signals real danger. Unusable output counts as no risk: the keywords still apply. */
-export async function modelSeesCrisis(model: ChatModel, text: string, previous?: string): Promise<boolean> {
+export async function modelSeesCrisis(model: ChatModel, text: string, previous?: string, signal?: AbortSignal): Promise<boolean> {
   const content = previous ? `用户上一条：${previous}\n用户这一条：${text}` : `用户这一条：${text}`;
   const completion = await model.complete(
     [
       { role: "system", content: PROMPT },
       { role: "user", content },
     ],
-    { json: true, temperature: 0, maxTokens: 1_000 },
+    { json: true, temperature: 0, maxTokens: 1_000, signal },
   );
   try {
     const parsed = ResultSchema.safeParse(JSON.parse(completion.text));

@@ -95,3 +95,39 @@ test("retention deletes old history, but with memory on only what the summary al
   expect(applyRetention(store, 20, now)).toBe(2); // memory off: everything older goes
   expect(store.recentMessages(10).map((m) => m.text)).toEqual(["今天"]);
 });
+
+test("a fold in flight doesn't write back over /history clear or /memory forget", async () => {
+  for (const interrupt of ["clear", "forget"] as const) {
+    const store = withMessages(50);
+    const source = store.addMessage("user", "我养了猫");
+    store.upsertFact({ category: "pet", key: "cat", value: "用户养了猫", eventDate: null, evidence: "我养了猫" }, source);
+    const model = new FakeModel([
+      () => {
+        if (interrupt === "clear") store.clearHistory();
+        else store.forgetFact(store.activeFacts()[0].id);
+        return summaryOf("用户养了猫");
+      },
+    ]);
+    expect(await updateSummary({ model, store, window: 40, timeZone: "UTC" })).toBeNull();
+    expect(store.getSetting(SUMMARY_SETTING)).toBeNull();
+  }
+});
+
+test("after a forget, messages the summary hadn't reached are never folded in", async () => {
+  const store = withMessages(60);
+  store.setSettings({ [SUMMARY_SETTING]: "旧", [SUMMARY_UPTO_SETTING]: "5" });
+  const source = store.addMessage("user", "我养了猫");
+  store.upsertFact({ category: "pet", key: "cat", value: "用户养了猫", eventDate: null, evidence: "我养了猫" }, source);
+  store.forgetFact(store.activeFacts()[0].id);
+  expect(store.getSetting(SUMMARY_UPTO_SETTING)).toBe(String(source.id));
+  for (let i = 0; i < 9; i++) store.addMessage("user", `之后${i}`);
+  // Only messages newer than the forget can be folded now, and not enough have aged out.
+  expect(await updateSummary({ model: new FakeModel([summaryOf("x")]), store, window: 40, timeZone: "UTC" })).toBeNull();
+});
+
+test("a long history is folded 100 at a time", async () => {
+  const store = withMessages(300);
+  const model = new FakeModel([summaryOf("第一批")]);
+  expect(await updateSummary({ model, store, window: 40, timeZone: "UTC" })).toMatchObject({ folded: 100 });
+  expect(store.getSetting(SUMMARY_UPTO_SETTING)).toBe("100");
+});

@@ -11,6 +11,8 @@ import { describeNow } from "../companion/time.ts";
 
 /** Fold messages in once at least this many have left the window. */
 export const SUMMARY_BATCH = 10;
+/** At most this many per call; a long existing history catches up over several turns. */
+export const SUMMARY_MAX_FOLD = 100;
 export const SUMMARY_MAX_CHARS = 400;
 
 export const SUMMARY_SETTING = "summary_text";
@@ -47,8 +49,9 @@ export async function updateSummary(opts: { model: ChatModel; store: Store; wind
   const { store } = opts;
   const recent = store.recentMessages(opts.window);
   if (!recent.length) return null;
+  const rev = store.summaryRev();
   const upto = Number(store.getSetting(SUMMARY_UPTO_SETTING) ?? 0);
-  const aged = store.messagesBetween(upto, recent[0].id);
+  const aged = store.messagesBetween(upto, recent[0].id).slice(0, SUMMARY_MAX_FOLD);
   if (aged.length < SUMMARY_BATCH) return null;
 
   const previous = store.getSetting(SUMMARY_SETTING) ?? "（还没有）";
@@ -68,9 +71,10 @@ export async function updateSummary(opts: { model: ChatModel; store: Store; wind
   } catch {
     return null;
   }
-  // Written together, so a crash between them can't fold the same messages twice.
-  store.setSettings({ [SUMMARY_SETTING]: summary, [SUMMARY_UPTO_SETTING]: String(aged.at(-1)!.id) });
-  return { folded: aged.length, chars: [...summary].length };
+  // Written together, and only if nobody cleared the summary meanwhile
+  // (/history clear, /memory forget): this fold was built on the old one.
+  const wrote = store.setSummaryIf(rev, { [SUMMARY_SETTING]: summary, [SUMMARY_UPTO_SETTING]: String(aged.at(-1)!.id) });
+  return wrote ? { folded: aged.length, chars: [...summary].length } : null;
 }
 
 /**

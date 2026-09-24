@@ -53,6 +53,9 @@ export class Companion {
     },
   ) {}
 
+  /** The last summary fold; the next one waits for it. */
+  private summaries: Promise<unknown> = Promise.resolve();
+
   private emit(event: CompanionEvent) {
     this.deps.onEvent?.(event);
   }
@@ -122,8 +125,11 @@ export class Companion {
             return outcome;
           })
           .then(async (outcome) => {
-            // Messages that just left the window get folded into the summary.
-            const folded = await updateSummary({ model: trackedModel, store, window: this.deps.historyMessages, timeZone });
+            // Messages that just left the window get folded into the summary,
+            // one fold at a time so two turns can't fold the same span.
+            const fold = this.summaries.then(() => updateSummary({ model: trackedModel, store, window: this.deps.historyMessages, timeZone }));
+            this.summaries = fold.catch(() => null);
+            const folded = await fold;
             if (folded) this.emit({ type: "summary", outcome: folded });
             return outcome;
           })
@@ -180,8 +186,12 @@ export class Companion {
         return completion;
       },
     };
-    const timeout = new Promise<boolean>((resolve) => setTimeout(() => resolve(false), CRISIS_CHECK_WAIT_MS).unref());
-    return Promise.race([modelSeesCrisis(logged, text, previous).catch(() => false), timeout]);
+    // Past the budget the answer counts as no, and the request is cancelled so it can't hold up shutdown.
+    const abort = new AbortController();
+    const timer = setTimeout(() => abort.abort(), CRISIS_CHECK_WAIT_MS);
+    return modelSeesCrisis(logged, text, previous, abort.signal)
+      .catch(() => false)
+      .finally(() => clearTimeout(timer));
   }
 
   /** One call, one repair attempt, then salvage or a fixed fallback. */
