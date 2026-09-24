@@ -9,7 +9,7 @@
 <p align="center">
 <a href="https://github.com/rick-mingyu-liu/DearByte/stargazers"><img src="https://img.shields.io/github/stars/rick-mingyu-liu/DearByte?style=flat" alt="GitHub Stars"></a>
 <img src="https://img.shields.io/badge/status-experimental-orange" alt="实验原型">
-<img src="https://img.shields.io/badge/Node.js-24%2B-339933" alt="Node.js 24+">
+<img src="https://img.shields.io/badge/Node.js-26%2B-339933" alt="Node.js 26+">
 </p>
 
 <p align="center"><a href="#快速开始">快速开始</a> · <a href="docs/guide.zh-CN.md">使用指南</a> · <a href="#数据与隐私">数据与隐私</a> · <a href="#参与开发">参与开发</a></p>
@@ -34,7 +34,7 @@ DearByte 目前是一个可以在终端运行、也可以实验性接入微信�
 
 ## 快速开始
 
-需要 **Node.js 24+**。先在终端认识小拜：
+需要 **Node.js 26+**（用 nvm 的话，在项目目录里 `nvm use` 即可）。先在终端认识小拜：
 
 ```bash
 git clone https://github.com/rick-mingyu-liu/DearByte.git
