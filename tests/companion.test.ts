@@ -28,10 +28,13 @@ function setup(responses: ConstructorParameters<typeof FakeModel>[0], memory = f
   return { store, model, events, companion };
 }
 
-test("a turn stores both sides and passes earlier turns as history", async () => {
+test("a turn stores both sides once sent, and passes earlier turns as history", async () => {
   const { store, model, companion } = setup([reply("早啊"), reply("还行吧", "你呢")]);
-  await companion.handle({ text: "早上好" });
+  const first = await companion.handle({ text: "早上好" });
+  first.commit(first.reply.bubbles);
   const turn = await companion.handle({ text: "今天怎么样" });
+  expect(store.recentMessages(10).map((m) => m.text)).toEqual(["早上好", "早啊", "今天怎么样"]); // not sent yet
+  turn.commit(turn.reply.bubbles);
 
   expect(turn.reply.bubbles).toEqual(["还行吧", "你呢"]);
   expect(store.recentMessages(10).map((m) => m.text)).toEqual(["早上好", "早啊", "今天怎么样", "还行吧\n你呢"]);
@@ -133,4 +136,14 @@ test("a photo sent to a model that can't see images becomes a note, not an error
   // Stored as the user sent it: their words and the image flag, not the note.
   expect(turn.userMessage.text).toBe("看");
   expect(turn.userMessage.hasImage).toBe(true);
+});
+
+test("only the bubbles that were sent are stored", async () => {
+  const { store, companion } = setup([reply("在的", "刚在忙"), reply("嗯")]);
+  const turn = await companion.handle({ text: "在吗" });
+  expect(turn.commit(["在的"])?.bubbles).toEqual(["在的"]); // the second bubble failed to send
+  expect(store.recentMessages(10).map((m) => m.text)).toEqual(["在吗", "在的"]);
+  const none = await companion.handle({ text: "？" });
+  expect(none.commit([])).toBeNull();
+  expect(store.recentMessages(10).map((m) => m.text)).toEqual(["在吗", "在的", "？"]);
 });

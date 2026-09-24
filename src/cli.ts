@@ -76,6 +76,7 @@ async function main() {
     }
     try {
       const turn = await companion.handle({ text, image });
+      turn.commit(turn.reply.bubbles); // the terminal always shows the whole reply
       held = [];
       for (const [i, bubble] of turn.reply.bubbles.entries()) {
         if (i > 0) await sleep(700 + Math.random() * 800);

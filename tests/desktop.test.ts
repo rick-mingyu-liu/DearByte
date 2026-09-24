@@ -518,3 +518,13 @@ test("4.x: when the capture fails, 小拜 is told she can't see it, not given th
   expect(sent).not.toContain("Image");
   expect(events.some((e) => e.type === "status" && e.message.includes("屏幕与系统录音"))).toBe(true);
 });
+
+test("only the bubbles that reached WeChat are remembered as said", async () => {
+  // First bubble goes out, the second fails for good (fill_failed isn't retried).
+  const { channel, store, sent } = setup({ responses: [reply("在的", "刚在忙")], sendErrors: ["", "fill_failed"] });
+  channel.poll({ chat: CHAT, rows: [said("hi")] });
+  channel.poll({ chat: CHAT, rows: [said("hi"), said("在吗")] });
+  await channel.settle();
+  expect(sent).toEqual(["在的"]);
+  expect(store.recentMessages(10).map((m) => m.text)).toEqual(["在吗", "在的"]);
+});

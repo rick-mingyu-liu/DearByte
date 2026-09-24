@@ -25,6 +25,7 @@ function setup(risk: boolean | "junk") {
 test("a crisis the keywords miss is caught by the model, and the reply is rewritten in safety mode", async () => {
   const { store, model, companion, events } = setup(true);
   const turn = await companion.handle({ text: "活着好没意思" });
+  turn.commit(turn.reply.bubbles);
   expect(turn.reply.bubbles).toEqual(["你现在人安全吗", "想找人说说可以打 12356"]);
   expect(events.some((e) => e.type === "crisis_detected")).toBe(true);
   expect(model.calls.filter((c) => isCheck(c.messages))).toHaveLength(1);
