@@ -2,7 +2,7 @@
 // one turn, load its photo, ask the companion, and send the bubbles with
 // pauses in between. The WeChat desktop and ClawBot channels both feed it.
 
-import type { Companion, TurnResult } from "../companion/companion.ts";
+import type { Companion, Initiative, TurnResult } from "../companion/companion.ts";
 import { FALLBACK_REPLY } from "../companion/output.ts";
 import type { ImageInput } from "../domain.ts";
 import { imageFromBytes } from "../media/images.ts";
@@ -21,6 +21,13 @@ export type ReplyEvent =
   | { type: "error"; message: string };
 
 export type SendResult = "sent" | "drafted" | "failed";
+
+/**
+ * How writing first went. "busy": a reply was in progress, nothing tried.
+ * "dropped": the user wrote (or replies paused) while it was being written,
+ * so it wasn't sent. "failed": nothing could be written or sent.
+ */
+export type InitiateResult = "sent" | "failed" | "dropped" | "busy";
 
 export type Outlet<M extends Incoming<unknown>> = {
   /** Several messages that arrived together → one turn. */
@@ -116,25 +123,28 @@ export class ReplyLoop<M extends Incoming<unknown>> {
   }
 
   /**
-   * 小拜 writes first. Returns false without doing anything while a reply is
-   * queued or being sent; the caller tries again later. Messages that arrive
-   * meanwhile are answered afterwards.
+   * 小拜 writes first, unless a reply is queued or in progress. If the user
+   * writes (or `shouldStop` turns true) before or between bubbles, the rest
+   * isn't sent: answering them comes first. Only sent bubbles are committed.
    */
-  initiate(reason: string, generate: () => Promise<string[]>): Promise<boolean> | false {
-    if (this.busy || this.queue.length) return false;
+  initiate(reason: string, generate: () => Promise<Initiative>, shouldStop: () => boolean = () => false): Promise<InitiateResult> {
+    if (this.busy || this.queue.length) return Promise.resolve("busy");
     this.busy = true;
-    const work = (async () => {
+    const interrupted = () => this.queue.length > 0 || shouldStop();
+    const work = (async (): Promise<InitiateResult> => {
       try {
-        this.emit({ type: "initiated", reason });
-        let bubbles: string[];
+        let draft: Initiative;
         try {
-          bubbles = await generate();
+          draft = await generate();
         } catch (err) {
-          this.emit({ type: "error", message: `主动消息生成失败：${(err as Error).message}` });
-          return true;
+          this.emit({ type: "error", message: `主动消息没发：${(err as Error).message}` });
+          return "failed";
         }
-        await this.sendAll(null, bubbles);
-        return true;
+        if (interrupted()) return "dropped";
+        this.emit({ type: "initiated", reason });
+        const sent = await this.sendAll(null, draft.bubbles, undefined, interrupted);
+        draft.commit(sent);
+        return sent.length ? "sent" : "failed";
       } finally {
         this.busy = false;
         if (this.queue.length) this.track(this.drain());
@@ -179,12 +189,17 @@ export class ReplyLoop<M extends Incoming<unknown>> {
     await typing(false);
   }
 
-  /** Sends bubbles in order with a typing pause before each after the first; stops at a failure. */
-  private async sendAll(message: M | null, bubbles: string[], typing?: () => Promise<void>): Promise<void> {
+  /**
+   * Sends bubbles in order with a typing pause before each after the first.
+   * Stops at a failure, or before a bubble once `stop` is true. Returns what was sent.
+   */
+  private async sendAll(message: M | null, bubbles: string[], typing?: () => Promise<void>, stop?: () => boolean): Promise<string[]> {
+    const sent: string[] = [];
     for (const [i, bubble] of bubbles.entries()) {
       if (i > 0) {
         await typing?.();
         await this.sleep(bubbleDelay(bubble, this.random()));
+        if (stop?.()) break;
       }
       const result = await this.deps.outlet.sendBubble(message, bubble).catch(() => "failed" as const);
       if (result === "failed") {
@@ -192,6 +207,8 @@ export class ReplyLoop<M extends Incoming<unknown>> {
         break;
       }
       this.emit({ type: result, bubble });
+      sent.push(bubble);
     }
+    return sent;
   }
 }

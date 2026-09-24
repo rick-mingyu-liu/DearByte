@@ -18,6 +18,9 @@ export type CompanionEvent =
   | { type: "memory"; outcome: ExtractionOutcome }
   | { type: "memory_error"; message: string };
 
+/** A message 小拜 may send first; `commit` stores what was actually sent. */
+export type Initiative = { bubbles: string[]; commit: (sent: string[]) => void };
+
 export type TurnResult = {
   reply: Reply;
   userMessage: StoredMessage;
@@ -106,9 +109,12 @@ export class Companion {
 
   /**
    * 小拜 messages first. `note` says why (a good morning, an exam today…); it
-   * reaches the model as a system note, and only the reply is stored.
+   * reaches the model as a system note. Nothing is stored until `commit` is
+   * called with the bubbles that were actually sent, so a message that never
+   * reached WeChat isn't remembered as said. Throws rather than returning the
+   * fallback reply: 「你再说一遍？」 makes no sense when nobody spoke.
    */
-  async initiate(note: string): Promise<Reply> {
+  async initiate(note: string): Promise<Initiative> {
     const { store, parts, timeZone } = this.deps;
     const now = this.deps.now?.() ?? new Date();
     const history = store.recentMessages(this.deps.historyMessages);
@@ -118,13 +124,16 @@ export class Companion {
     const text =
       `（系统提示，不是用户说的）用户现在没有发消息，是你主动找用户。${note}\n` +
       "像朋友随手发的微信那样开个头：1 条，最多 2 条，每条很短。不要说“提醒你”“我记得你说过”“根据记录”，不要用“在吗”开头。";
-    let reply = await this.generate(buildMessages(system, history, { text }));
-    if (reply.bubbles.length > CHAT_MAX_BUBBLES) {
-      this.emit({ type: "reply_trimmed", dropped: reply.bubbles.slice(CHAT_MAX_BUBBLES) });
-      reply = { bubbles: reply.bubbles.slice(0, CHAT_MAX_BUBBLES) };
-    }
-    store.addMessage("assistant", reply.bubbles.join("\n"), { bubbles: reply.bubbles, createdAt: now.toISOString() });
-    return reply;
+    const reply = await this.generate(buildMessages(system, history, { text }));
+    if (reply === FALLBACK_REPLY) throw new Error("模型没给出能用的内容，这次不发");
+    if (reply.bubbles.length > CHAT_MAX_BUBBLES) this.emit({ type: "reply_trimmed", dropped: reply.bubbles.slice(CHAT_MAX_BUBBLES) });
+    return {
+      bubbles: reply.bubbles.slice(0, CHAT_MAX_BUBBLES),
+      commit: (sent) => {
+        if (!sent.length) return;
+        store.addMessage("assistant", sent.join("\n"), { bubbles: sent, createdAt: (this.deps.now?.() ?? new Date()).toISOString() });
+      },
+    };
   }
 
   /** One call, one repair attempt, then salvage or a fixed fallback. */

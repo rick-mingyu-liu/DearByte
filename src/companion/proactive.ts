@@ -3,6 +3,7 @@
 // long silence, and sometimes just thinks of you in the afternoon. A friend also doesn't double-text, doesn't message at
 // night, and doesn't interrupt a conversation that just ended.
 
+import { z } from "zod";
 import type { Fact, StoredMessage } from "../domain.ts";
 import { localDate, localMinutes } from "./time.ts";
 
@@ -20,6 +21,31 @@ export type ProactiveState = {
 };
 
 export type ProactivePlan = { key: string; note: string };
+
+const StateSchema = z.object({
+  date: z.string(),
+  morningAt: z.number().nullable(),
+  thinkingAt: z.number().nullable().optional(),
+  sent: z.array(z.string()),
+  lastAt: z.string().nullable(),
+});
+
+/** The saved state, or null (a fresh day) when missing or unreadable, so a bad value can't jam the feature. */
+export function parseProactiveState(raw: string | null): ProactiveState | null {
+  if (!raw) return null;
+  try {
+    const parsed = StateSchema.safeParse(JSON.parse(raw));
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
+
+export const PROACTIVE_STATE_SETTING = "proactive_state";
+
+export function readProactiveState(store: { getSetting(key: string): string | null }): ProactiveState | null {
+  return parseProactiveState(store.getSetting(PROACTIVE_STATE_SETTING));
+}
 
 const hm = (h: number, m = 0) => h * 60 + m;
 /** No proactive messages outside these hours. */
@@ -123,4 +149,15 @@ export function planProactive(ctx: {
     return { key: "morning", note: "现在是早上。跟用户随口打个招呼，可以顺带聊点今天的事（早饭、天气、今天要忙啥都行），每天说法别一样。" };
   }
   return null;
+}
+
+/**
+ * State after an attempt. A tried key isn't retried today, sent or not. Only a
+ * message that went out counts as unanswered (lastAt), so one failure can't
+ * hold back every later message until the user happens to write.
+ * "busy" and "dropped" change nothing: the next minute tries again.
+ */
+export function recordAttempt(state: ProactiveState, key: string, result: "sent" | "failed" | "dropped" | "busy", now: Date): ProactiveState {
+  if (result === "busy" || result === "dropped") return state;
+  return { ...state, sent: [...state.sent, key], lastAt: result === "sent" ? now.toISOString() : state.lastAt };
 }

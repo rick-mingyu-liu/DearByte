@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import { ReplyLoop } from "../src/channels/reply-loop.ts";
 import { Companion } from "../src/companion/companion.ts";
-import { dayState, planProactive, type ProactiveState } from "../src/companion/proactive.ts";
+import { dayState, parseProactiveState, planProactive, recordAttempt, type ProactiveState } from "../src/companion/proactive.ts";
 import { buildMessages, loadPromptParts, QUIET_GAP } from "../src/companion/prompt.ts";
 import { ROOT } from "../src/config.ts";
 import type { Fact, StoredMessage } from "../src/domain.ts";
@@ -69,26 +69,35 @@ test("a new day starts fresh but remembers the last nudge", () => {
   expect(dayState(null, "2026-09-24", () => 0.9).thinkingAt).toBeNull();
 });
 
-test("initiate stores only 小拜's message, and history marks the user's silence", async () => {
+test("initiate stores only what was sent, and history marks the user's silence", async () => {
   const store = Store.open(":memory:");
   const model = new FakeModel([JSON.stringify({ bubbles: ["早啊臭宝", "吃了没", "今天忙啥"] })]);
   const companion = new Companion({ store, model, parts: loadPromptParts(ROOT), timeZone: TZ, historyMessages: 40, now: () => at("08:30") });
   store.addMessage("user", "晚安", { createdAt: at("23:00", "2026-09-23").toISOString() });
   store.addMessage("assistant", "晚安", { bubbles: ["晚安"], createdAt: at("23:00", "2026-09-23").toISOString() });
 
-  expect((await companion.initiate("早上打个招呼")).bubbles).toEqual(["早啊臭宝", "吃了没"]);
+  const draft = await companion.initiate("早上打个招呼");
+  expect(draft.bubbles).toEqual(["早啊臭宝", "吃了没"]);
   expect(String(model.calls[0].messages.at(-1)?.content)).toContain("主动找用户");
-  expect(store.recentMessages(10).map((m) => m.role)).toEqual(["user", "assistant", "assistant"]);
+  expect(store.messageCount()).toBe(2); // nothing stored before sending
+  draft.commit(["早啊臭宝"]);
+  expect(store.recentMessages(10).at(-1)?.bubbles).toEqual(["早啊臭宝"]);
 
   const next = buildMessages("sys", store.recentMessages(10), { text: "早" });
   expect(next.map((m) => m.role)).toEqual(["system", "user", "assistant", "user", "assistant", "user"]);
   expect(next[3].content).toBe(QUIET_GAP);
 });
 
-test("the loop won't write first mid-reply, and answers messages that arrive meanwhile", async () => {
+test("initiate never falls back to 「你再说一遍？」 when the model fails", async () => {
+  const store = Store.open(":memory:");
+  const companion = new Companion({ store, model: new FakeModel(["???", "!!!"]), parts: loadPromptParts(ROOT), timeZone: TZ, historyMessages: 40 });
+  await expect(companion.initiate("早上打个招呼")).rejects.toThrow("这次不发");
+  expect(store.messageCount()).toBe(0);
+});
+
+function loopSetup() {
   const sent: string[] = [];
-  let release!: () => void;
-  const gate = new Promise<void>((r) => (release = r));
+  const committed: string[][] = [];
   const store = Store.open(":memory:");
   const companion = new Companion({ store, model: new FakeModel([JSON.stringify({ bubbles: ["回你"] })]), parts: loadPromptParts(ROOT), timeZone: TZ, historyMessages: 40 });
   const loop = new ReplyLoop<{ text: string; image: null }>({
@@ -96,16 +105,71 @@ test("the loop won't write first mid-reply, and answers messages that arrive mea
     sleep: async () => {},
     outlet: { merge: (b) => b.at(-1)!, loadImage: async () => new Uint8Array(), sendBubble: async (_m, b) => (sent.push(b), "sent") },
   });
+  const draft = (...bubbles: string[]) => ({ bubbles, commit: (s: string[]) => void committed.push(s) });
+  return { loop, sent, committed, draft };
+}
 
-  const first = loop.initiate("morning", async () => (await gate, ["早"]));
-  expect(first).not.toBe(false);
-  expect(loop.initiate("again", async () => ["不该发"])).toBe(false);
+test("the loop won't write first mid-reply", async () => {
+  const { loop, sent, draft } = loopSetup();
+  let release!: () => void;
+  const gate = new Promise<void>((r) => (release = r));
+  const first = loop.initiate("morning", async () => (await gate, draft("早")));
+  expect(await loop.initiate("again", async () => draft("不该发"))).toBe("busy");
+  release();
+  expect(await first).toBe("sent");
+  expect(sent).toEqual(["早"]);
+});
+
+test("a message from the user while it's being written drops it; the user is answered instead", async () => {
+  const { loop, sent, committed, draft } = loopSetup();
+  let release!: () => void;
+  const gate = new Promise<void>((r) => (release = r));
+  const first = loop.initiate("morning", async () => (await gate, draft("早", "吃了没")));
   loop.push([{ text: "在", image: null }]);
   release();
-  await first;
+  expect(await first).toBe("dropped");
   await loop.settle();
-  expect(sent).toEqual(["早", "回你"]);
-  expect(loop.initiate("queued", async () => ["x"])).not.toBe(false);
+  expect(sent).toEqual(["回你"]);
+  expect(committed).toEqual([]);
+});
+
+test("a message between bubbles stops the rest; only the sent bubble is committed", async () => {
+  const { loop, sent, committed, draft } = loopSetup();
+  const result = loop.initiate("morning", async () => draft("早", "吃了没"));
+  // The user writes right after the first bubble goes out.
+  const push = () => loop.push([{ text: "在", image: null }]);
+  const origSent = sent.push.bind(sent);
+  sent.push = (...b: string[]) => (b[0] === "早" && push(), origSent(...b));
+  expect(await result).toBe("sent");
+  await loop.settle();
+  expect([...sent]).toEqual(["早", "回你"]);
+  expect(committed).toEqual([["早"]]);
+});
+
+test("a generation error sends nothing and reports failed", async () => {
+  const { loop, sent } = loopSetup();
+  expect(
+    await loop.initiate("morning", async () => {
+      throw new Error("timeout");
+    }),
+  ).toBe("failed");
+  expect(sent).toEqual([]);
+});
+
+test("only a message that went out holds back the next one", () => {
+  const now = at("09:00");
+  expect(recordAttempt(state(), "morning", "sent", now)).toEqual(state({ sent: ["morning"], lastAt: now.toISOString() }));
+  expect(recordAttempt(state(), "morning", "failed", now)).toEqual(state({ sent: ["morning"] }));
+  expect(recordAttempt(state(), "morning", "dropped", now)).toEqual(state());
+  expect(recordAttempt(state(), "morning", "busy", now)).toEqual(state());
+});
+
+test("a corrupt saved state starts a fresh day instead of jamming", () => {
+  expect(parseProactiveState("{")).toBeNull();
+  expect(parseProactiveState(JSON.stringify({ date: "x" }))).toBeNull();
+  expect(parseProactiveState(null)).toBeNull();
+  const ok = state({ morningAt: 500 });
+  expect(parseProactiveState(JSON.stringify(ok))).toEqual(ok);
 });
 
 test("thinks of the user some afternoons, after a few quiet hours", () => {

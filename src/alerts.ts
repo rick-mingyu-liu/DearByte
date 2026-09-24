@@ -48,7 +48,7 @@ export class Watchdog {
   }
 }
 
-/** macOS notification, plus a POST to `url` when given. Failures are reported, never thrown. */
+/** macOS notification with details, plus a detail-free POST to `url` when given. Failures are reported, never thrown. */
 export function systemNotifier(url: string | null, onError: (message: string) => void): Notify {
   return (title, body) => {
     // Arguments go through argv, so quotes in the text can't break the script.
@@ -58,8 +58,9 @@ export function systemNotifier(url: string | null, onError: (message: string) =>
       (err) => err && onError(`系统通知失败：${err.message}`),
     );
     if (url) {
-      // HTTP headers can't carry Chinese, so the title leads the body.
-      fetch(url, { method: "POST", body: `${title}：${body}`, signal: AbortSignal.timeout(10_000) })
+      // The push goes through a third-party service, so it carries no details
+      // (the details name chats and people); those stay in the Mac notification.
+      fetch(url, { method: "POST", body: `${title}（详情看 Mac 上的通知）`, signal: AbortSignal.timeout(10_000) })
         .then((r) => !r.ok && onError(`推送失败：HTTP ${r.status}`))
         .catch((err: Error) => onError(`推送失败：${err.message}`));
     }

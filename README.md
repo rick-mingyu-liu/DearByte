@@ -54,8 +54,8 @@ How it behaves:
   - a check-in after 20 hours or more without hearing from you, in the afternoon;
   - on about 7 days in 10, a "just thought of you" message at a random time between 13:00 and 20:00, after 3 quiet hours: usually a question about something you told it.
 
-  If you ask for space (「别给我发消息了」「让我静静」), it doesn't write first for 3 days. It never writes between 22:30 and 8:00, sends at most 2 a day, waits 90 minutes after a conversation, and never sends another until you've replied to the last one. It checks once a minute and only when the chat is open and replies aren't paused. Draft mode never writes first.
-- **Alerts:** if 小拜 can't read the chat for a minute (chat closed, renamed to a name not in the list, WeChat not running), you get a macOS notification, and another when it recovers. A bubble that can't be sent alerts too, at most once per 10 minutes. For alerts on your phone, set `COMPANION_ALERT_URL` to an [ntfy](https://ntfy.sh) topic URL (e.g. `https://ntfy.sh/<a-long-random-name>`) and subscribe to it in the ntfy app. Anyone who knows the topic name can read the alerts, so make it hard to guess.
+  If you ask for space (「别给我发消息了」「让我静静」), it doesn't write first for 3 days. A message is stored in the chat history only once it has actually been sent. If you write while 小拜 is composing one, it's dropped and your message is answered instead. It never writes between 22:30 and 8:00, sends at most 2 a day, waits 90 minutes after a conversation, and never sends another until you've replied to the last one. It checks once a minute and only when the chat is open and replies aren't paused. Draft mode never writes first.
+- **Alerts:** if 小拜 isn't answering for a minute (chat closed or renamed to a name not in the list, WeChat not running, the chat reading empty, or replies paused), you get a macOS notification with the reason, and another when it recovers. A bubble that can't be sent alerts too, at most once per 10 minutes. For alerts on your phone, set `COMPANION_ALERT_URL` to an [ntfy](https://ntfy.sh) topic URL (e.g. `https://ntfy.sh/<a-long-random-name>`) and subscribe to it in the ntfy app. The push says only that 小拜 stopped or recovered, never chat names; the details stay in the Mac notification. Make the topic name hard to guess anyway.
 - **Staying awake:** the Mac is kept from idle sleep while 小拜 runs (`caffeinate`). The display can still sleep. Closing the lid still sleeps a MacBook unless it's on power with an external display.
 - **Sending:** the helper types each bubble into the composer and presses Return, then confirms the bubble appeared. It never sends while someone has a draft in the composer, and never resends a bubble it couldn't confirm.
 
@@ -106,7 +106,7 @@ message ─► SQLite (history) ─► prompt ─► deepseek-flash ─► check
 | `DEEPSEEK_MODEL` | `deepseek-flash` (supports vision) |
 | `COMPANION_DB` | `data/companion.sqlite` |
 | `COMPANION_ALERT_URL` | Optional. An ntfy topic URL for alerts on your phone. |
-| `COMPANION_TZ` | The Mac's time zone. Used for 小拜's sense of time, dates like 下周六, and when it may write first. |
+| `COMPANION_TZ` | The Mac's time zone. Used for 小拜's sense of time, dates like 下周六, and when it may write first. Set it to the chat partner's zone (e.g. `Asia/Shanghai`) if the Mac is elsewhere, or 小拜 may write to them at night. |
 | `COMPANION_HISTORY_MESSAGES` | `40` (the last 20 turns, verbatim) |
 | `COMPANION_WECHAT_MEDIA_DIR` | unset. The `…/<小拜 account>/Message/MessageTemp/<chat>/Image` folder inside WeChat's container; needed for photos. |
 

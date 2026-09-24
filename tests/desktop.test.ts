@@ -383,3 +383,25 @@ test("a bubble that can't be sent is reported as a send failure", async () => {
   await channel.settle();
   expect(events.some((e) => e.type === "send_failed")).toBe(true);
 });
+
+test("health reports a pause and a chat that keeps reading empty, for alerts", () => {
+  const { channel } = setup();
+  channel.poll({ chat: CHAT, rows: [said("早")] });
+  expect(channel.health).toBeNull();
+  channel.paused = true;
+  expect(channel.health).toContain("暂停");
+  channel.resume();
+  for (let i = 0; i < 29; i++) channel.poll({ chat: CHAT, rows: [] });
+  expect(channel.health).toBeNull(); // a blip
+  channel.poll({ chat: CHAT, rows: [] });
+  expect(channel.health).toContain("读成空的");
+  channel.poll({ chat: CHAT, rows: [said("早")] });
+  expect(channel.health).toBeNull();
+});
+
+test("a draft-mode channel never reports a pause as a problem", () => {
+  const { channel } = setup({ mode: "draft" });
+  channel.poll({ chat: CHAT, rows: [said("早")] });
+  channel.paused = true;
+  expect(channel.health).toBeNull();
+});

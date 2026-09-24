@@ -3,13 +3,16 @@
 // user into messages for the reply loop, and types the replies back.
 
 import type { Companion } from "../../companion/companion.ts";
-import { mergeIncoming, ReplyLoop, type Incoming, type ReplyEvent, type SendResult } from "../reply-loop.ts";
+import type { Initiative } from "../../companion/companion.ts";
+import { mergeIncoming, ReplyLoop, type Incoming, type InitiateResult, type ReplyEvent, type SendResult } from "../reply-loop.ts";
 import { HelperError, type WechatUi } from "./helper.ts";
 import type { PhotoFolder } from "./photos.ts";
 import { describeOther, newRows, parseRow, rememberRows } from "./rows.ts";
 
 const POLL_MS = 1_000;
 const ERROR_BACKOFF_MS = 5_000;
+/** This many empty reads in a row (about 30 s) count as a problem, not a blip. */
+const EMPTY_READS_PROBLEM = 30;
 /** A draft in the composer (someone typing on the Mac) gets this long to clear. */
 const BUSY_RETRIES = 3;
 const BUSY_WAIT_MS = 3_000;
@@ -37,6 +40,8 @@ export class DesktopChannel {
   private readonly reportedUnknown = new Set<string>();
   /** Why 小拜 can't read the chat right now, or null when it's in sync. */
   problem: string | null = null;
+  /** Snapshots in a row with no rows although the chat had some. */
+  private emptyReads = 0;
   paused = false;
   /** Set on shutdown: finish the turn in memory, but type nothing more into WeChat. */
   stopping = false;
@@ -78,6 +83,11 @@ export class DesktopChannel {
     this.senders.clear();
   }
 
+  /** Why 小拜 isn't answering right now, or null. For alerts: a pause counts, as it's easy to forget. */
+  get health(): string | null {
+    return this.problem ?? (this.paused && this.deps.mode !== "draft" ? "小拜暂停了，新消息不会回复（/resume 恢复）" : null);
+  }
+
   get mode(): Mode {
     return this.deps.mode;
   }
@@ -103,11 +113,13 @@ export class DesktopChannel {
 
   /**
    * 小拜 writes first, if the bound chat is open and in sync, replies aren't
-   * paused, and no reply is in progress. Resolves true once it was attempted.
+   * paused, and no reply is in progress. Pausing, a chat problem or shutdown
+   * while the message is being written stops it.
    */
-  async initiate(reason: string, generate: () => Promise<string[]>): Promise<boolean> {
-    if (this.seen === null || this.lastStatus || this.paused || this.stopping) return false;
-    return (await this.loop.initiate(reason, generate)) === true;
+  async initiate(reason: string, generate: () => Promise<Initiative>): Promise<InitiateResult> {
+    const blocked = () => this.problem !== null || this.paused || this.stopping;
+    if (this.seen === null || this.lastStatus || blocked()) return "busy";
+    return this.loop.initiate(reason, generate, blocked);
   }
 
   /** Polls until `signal` aborts. Messages already in the chat at start are never answered. */
@@ -142,7 +154,11 @@ export class DesktopChannel {
       return;
     }
     // A full chat never really empties between two polls; that's a bad read.
-    if (!snapshot.rows.length && this.seen.length) return;
+    if (!snapshot.rows.length && this.seen.length) {
+      if (++this.emptyReads >= EMPTY_READS_PROBLEM) this.problem = "微信的聊天记录一直读成空的（窗口可能被挡住或最小化了）";
+      return;
+    }
+    this.emptyReads = 0;
     this.status("");
 
     const added = newRows(this.seen, snapshot.rows, (old) => parseRow(old).kind === "meta");
