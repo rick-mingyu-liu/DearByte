@@ -39,7 +39,7 @@ const HELPER_MESSAGES: Record<string, string> = {
   fill_failed: "没能把文字填进输入框",
   changed_before_send: "发送前聊天或输入框变了，已取消",
   not_sent: "按了回车但消息没发出去，没有发送（输入框里小拜的文字已尽量撤回）",
-  unconfirmed: "按了回车但没看到消息出现，不确定是否发出（不会重发）",
+  unconfirmed: "按了回车，但输入框里的内容被改动了，不确定是否发出（不会重发）",
   not_focused: "输入框没拿到焦点，没有发送",
   other_window_open: "微信开着另一个聊天窗口，回车可能发到那边，没有发送（关掉独立的聊天窗口）",
   window_unknown: "看不出微信当前是哪个窗口在前，没有发送（把微信切到当前桌面看一眼）",

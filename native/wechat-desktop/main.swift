@@ -44,6 +44,9 @@ func find(_ e: AXUIElement, role: String, description: String? = nil, depth: Int
 
 struct HelperError: Error { let message: String }
 
+/// How many of the newest rows a snapshot returns.
+let recentRows = 60
+
 struct Chat {
     let app: NSRunningApplication
     let root: AXUIElement
@@ -82,9 +85,13 @@ struct Chat {
     /// Throws rather than returning a short list when Accessibility doesn't answer,
     /// so a failed read never looks like an emptied chat.
     func rows() throws -> [String] {
-        guard let children = attr(table, kAXChildrenAttribute) as? [AXUIElement] else {
+        guard let all = attr(table, kAXChildrenAttribute) as? [AXUIElement] else {
             throw HelperError(message: "read_failed")
         }
+        // Only the newest rows: 4.x keeps a placeholder for every row ever
+        // scrolled past, and each row costs Accessibility calls. The channel
+        // aligns snapshots allowing up to 50 rows to drop off the top.
+        let children = all.suffix(recentRows)
         if modern {
             return children.map { row in
                 switch str(row, "AXIdentifier") {
@@ -103,8 +110,30 @@ struct Chat {
     }
 }
 
+/// The chat found last time. Finding it walks WeChat's whole window, so it's
+/// reused while its controls still answer; switching chats in WeChat keeps
+/// them, and a closed window or restarted WeChat makes it look again.
+var cachedChat: Chat?
+
+extension Chat {
+    var stillThere: Bool {
+        guard !app.isTerminated,
+              let main = attr(root, kAXMainWindowAttribute), CFGetTypeID(main) == AXUIElementGetTypeID(), CFEqual(main, window),
+              str(table, kAXRoleAttribute) != nil, str(composer, kAXRoleAttribute) != nil else { return false }
+        return !modern || (str(table, "AXIdentifier") == "chat_message_list" && str(composer, "AXIdentifier") == "chat_input_field")
+    }
+}
+
 func openChat() throws -> Chat {
     guard AXIsProcessTrusted() else { throw HelperError(message: "no_accessibility_permission") }
+    if let chat = cachedChat, chat.stillThere { return chat }
+    cachedChat = nil
+    let chat = try findChat()
+    cachedChat = chat
+    return chat
+}
+
+func findChat() throws -> Chat {
     let apps = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId)
     guard let app = apps.first else { throw HelperError(message: "wechat_not_running") }
     let root = AXUIElementCreateApplication(app.processIdentifier)
@@ -134,12 +163,6 @@ func send(chat boundName: String, text: String) throws -> [String: Any] {
     guard chat.name == boundName else { throw HelperError(message: "wrong_chat") }
     guard chat.draft.isEmpty else { throw HelperError(message: "composer_not_empty") }
     if let problem = chat.returnTarget(), problem != "not_focused" { throw HelperError(message: problem) }
-    // 4.x may draw emoji codes like [白眼] as pictures, so compare without them (as bubbleKey does on the Node side).
-    let key: (String) -> String = chat.modern ? bubbleKey : { $0 }
-    let before = try chat.rows().map(key)
-    let expected = key(chat.modern ? "Bubble:\(text)" : "MeSaid:\(text)")
-    let tail = 3
-
     guard AXUIElementSetAttributeValue(chat.composer, kAXValueAttribute as CFString, text as CFString) == .success else {
         throw HelperError(message: "fill_failed")
     }
@@ -154,16 +177,11 @@ func send(chat boundName: String, text: String) throws -> [String: Any] {
     }
     pressReturn(chat.app)
 
-    // Sent means: Return took our text out of the composer, and a new "MeSaid"
-    // row with it appeared. The table can drop rows from the top, so look at
-    // the rows appended after the old ones, not at the row count.
-    let beforeCount = before.suffix(tail).filter { $0 == expected }.count
+    // Sent means Return took our text out of the composer. Which row is ours
+    // is the channel's call (rows.ts), so matching rules live in one place.
     for _ in 0..<24 {
         usleep(250_000)
-        guard let rows = (try? chat.rows())?.map(key), chat.draft.isEmpty else { continue }
-        if appended(before, rows).contains(expected) || rows.suffix(tail).filter({ $0 == expected }).count > beforeCount {
-            return ["ok": true]
-        }
+        if chat.draft.isEmpty { return ["ok": true] }
     }
     // Return may or may not have gone through; never retry blindly.
     if chat.draft.hasPrefix(text) {
@@ -171,12 +189,6 @@ func send(chat boundName: String, text: String) throws -> [String: Any] {
         throw HelperError(message: "not_sent")
     }
     throw HelperError(message: "unconfirmed")
-}
-
-/// Bubble text without spaces or emoji codes; must match bubbleKey in rows.ts.
-func bubbleKey(_ row: String) -> String {
-    row.replacingOccurrences(of: "\\[[^\\[\\]\\s]{1,12}\\]", with: "", options: .regularExpression)
-        .replacingOccurrences(of: "\\s+", with: "", options: .regularExpression)
 }
 
 /// Takes our text back out of the composer. The composer was empty when we
@@ -187,20 +199,6 @@ func clear(_ chat: Chat, _ text: String, _ boundName: String) {
     guard chat.name == boundName, draft.hasPrefix(text) else { return }
     let rest = String(draft.dropFirst(text.count))
     AXUIElementSetAttributeValue(chat.composer, kAXValueAttribute as CFString, rest as CFString)
-}
-
-/// Rows added after `before`, allowing rows dropped from the top.
-func appended(_ before: [String], _ rows: [String]) -> [String] {
-    if before.isEmpty { return rows }
-    // Keep at least one old row as an anchor, or anything would "line up".
-    // Rows rarely drop by more than a few per send; 50 matches the Node side.
-    for dropped in 0..<min(before.count, 51) {
-        let kept = before[dropped...]
-        if rows.count >= kept.count, rows.prefix(kept.count).elementsEqual(kept) {
-            return Array(rows.dropFirst(kept.count))
-        }
-    }
-    return []
 }
 
 func rect(_ e: AXUIElement) -> CGRect? {

@@ -6,7 +6,6 @@ What could make DearByte better, roughly in the order worth doing. [how-it-works
 
 | What | Why | Size |
 |---|---|---|
-| Save a reply only after it's sent | A normal reply is saved before it goes out. If sending fails, 小拜 "remembers" saying something the user never saw. Messages she writes first already work the right way (`Initiative.commit`). | S |
 | Vary the openers of messages she writes first | 3 of 8 test good-mornings said 「今天周四」. Pass her last few openers in, as replies already do with 「最近说过的话」. | S |
 | Catch up after a resync | When the chat table jumps ("聊天记录跳动了"), messages in that gap are skipped. The runner could compare the rows with the stored history and answer what's missing. | M |
 
