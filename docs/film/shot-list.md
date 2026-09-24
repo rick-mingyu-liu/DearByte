@@ -58,4 +58,4 @@ The caption hides "who" until the reveal. That gap is the twist.
 ## Privacy check before posting
 
 - Crop out the Mac's menu bar, other chats in WeChat's list, and your real account name.
-- The ntfy alert and `--film` output show no real names. The WeChat chat title does (「张三」). Rename the chat's remark to something you're happy to show, and add the new name to `data/contacts.json` and restart the runner first so 小拜 keeps replying.
+- `--film` labels your messages with the **first** name in `data/contacts.json` (now 「Rick」). Put the name you want on camera first. The WeChat chat title shows too (「张三」). Rename the chat's remark to something you're happy to show, and add the new name to `data/contacts.json` and restart the runner first so 小拜 keeps replying.
