@@ -5,6 +5,9 @@ A Chinese-speaking AI companion, 小拜 (嘴贫但细心), with persistent memor
 **Status** ([full plan](docs/plan.md)):
 - The companion works in a terminal simulator.
 - 小拜 runs on **a real WeChat account with its own name and avatar**. WeChat for Mac, logged in as 小拜, is driven through macOS Accessibility. Text and photos were tested live on 2026-09-24. See [the transport notes](docs/design/wechat-transport.md) for how it works and the risks.
+- It remembers facts, how you want it to talk, and a rolling summary of older chat. It sometimes writes first (good mornings, luck on exam days, check-ins), and it checks every message for crisis signals.
+
+**New here?** Read [how it works](docs/how-it-works.md) first.
 
 ## Setup
 
@@ -138,6 +141,7 @@ src/storage/store.ts     SQLite (node:sqlite): messages, facts, settings
 src/model/               DeepSeek client and fake model
 tools/bakeoff.ts         persona bake-off
 tools/inspect-wechat.swift  read-only WeChat accessibility probe
+docs/how-it-works.md     start here: how the whole system works
 docs/plan.md             plan: decisions, status, milestones
 docs/                    provenance and design notes
 ```
