@@ -4,13 +4,17 @@
 //   {"cmd":"snapshot"}                    → the open chat's name and message rows
 //   {"cmd":"check"}                       → whether Return would reach the composer (read-only)
 //   {"cmd":"send","chat":"…","text":"…"}  → type into the composer, press Return, confirm
+//   {"cmd":"capture_photo"}               → 4.x: the newest photo in the chat, as JPEG (base64)
 // Sending refuses unless the open chat is the bound one and the composer is
 // empty, so it never types into another chat or over someone's draft.
-// Nothing here reads WeChat's files, clipboard or screen.
+// Nothing here reads WeChat's files or clipboard. The only picture taken is of
+// WeChat's own window, cropped to a photo the user sent: 4.x stores received
+// photos encrypted, and we don't decrypt them.
 
 import AppKit
 import ApplicationServices
 import Foundation
+import ScreenCaptureKit
 
 setvbuf(stdout, nil, _IOLBF, 0)
 let bundleId = "com.tencent.xinWeChat"
@@ -199,6 +203,73 @@ func appended(_ before: [String], _ rows: [String]) -> [String] {
     return []
 }
 
+func rect(_ e: AXUIElement) -> CGRect? {
+    var p = CGPoint.zero, z = CGSize.zero
+    guard let pv = attr(e, kAXPositionAttribute), let sv = attr(e, kAXSizeAttribute),
+          AXValueGetValue(pv as! AXValue, .cgPoint, &p), AXValueGetValue(sv as! AXValue, .cgSize, &z) else { return nil }
+    return CGRect(origin: p, size: z)
+}
+
+/// Waits for a completion-handler API; the helper's loop is synchronous.
+func wait<T>(_ body: (@escaping (T?, Error?) -> Void) -> Void) throws -> T {
+    let done = DispatchSemaphore(value: 0)
+    var result: T?, failure: Error?
+    body { value, error in result = value; failure = error; done.signal() }
+    guard done.wait(timeout: .now() + 8) == .success else { throw HelperError(message: "capture_failed") }
+    if let failure { throw failure }
+    guard let result else { throw HelperError(message: "capture_failed") }
+    return result
+}
+
+/// The newest photo in the open chat (4.x), cut out of a capture of WeChat's
+/// window. Row frames come from Accessibility in screen points, top-left origin,
+/// as do ScreenCaptureKit's window frames.
+func capturePhoto() throws -> String {
+    let chat = try openChat()
+    guard chat.modern else { throw HelperError(message: "capture_unsupported") }
+    guard CGPreflightScreenCaptureAccess() else {
+        CGRequestScreenCaptureAccess()
+        throw HelperError(message: "no_screen_permission")
+    }
+    guard let row = kids(chat.table).last(where: {
+              str($0, "AXIdentifier") == "chat_bubble_item_view" && ["Image", "Photo", "[Image]", "[Photo]"].contains(str($0, kAXTitleAttribute) ?? "")
+          }),
+          let rowRect = rect(row), let listRect = rect(chat.table), let windowRect = rect(chat.window) else {
+        throw HelperError(message: "photo_not_visible")
+    }
+    // Only the part of the row that's on screen inside the chat list.
+    let visible = rowRect.intersection(listRect)
+    guard visible.height >= 20 else { throw HelperError(message: "photo_not_visible") }
+
+    let content: SCShareableContent = try wait { done in
+        SCShareableContent.getExcludingDesktopWindows(true, onScreenWindowsOnly: false) { c, e in done(c, e) }
+    }
+    let candidates = content.windows.filter { $0.owningApplication?.processID == chat.app.processIdentifier && $0.windowLayer == 0 }
+    guard let window = candidates.min(by: { distance($0.frame, windowRect) < distance($1.frame, windowRect) }) else {
+        throw HelperError(message: "capture_failed")
+    }
+    let scale = NSScreen.screens.map(\.backingScaleFactor).max() ?? 2
+    let config = SCStreamConfiguration()
+    config.width = Int(window.frame.width * scale)
+    config.height = Int(window.frame.height * scale)
+    config.showsCursor = false
+    let image: CGImage = try wait { done in
+        SCScreenshotManager.captureImage(contentFilter: SCContentFilter(desktopIndependentWindow: window), configuration: config) { i, e in done(i, e) }
+    }
+    let px = CGFloat(image.width) / window.frame.width
+    let crop = CGRect(x: (visible.minX - window.frame.minX) * px, y: (visible.minY - window.frame.minY) * px,
+                      width: visible.width * px, height: visible.height * px).integral
+    guard let cut = image.cropping(to: crop),
+          let jpeg = NSBitmapImageRep(cgImage: cut).representation(using: .jpeg, properties: [.compressionFactor: 0.9]) else {
+        throw HelperError(message: "capture_failed")
+    }
+    return jpeg.base64EncodedString()
+}
+
+func distance(_ a: CGRect, _ b: CGRect) -> CGFloat {
+    abs(a.minX - b.minX) + abs(a.minY - b.minY) + abs(a.width - b.width) + abs(a.height - b.height)
+}
+
 func reply(_ object: [String: Any]) {
     if let data = try? JSONSerialization.data(withJSONObject: object), let line = String(data: data, encoding: .utf8) {
         print(line)
@@ -227,6 +298,8 @@ while let line = readLine() {
                 throw HelperError(message: "bad_request")
             }
             reply(try send(chat: boundName, text: text).merging(["id": id]) { a, _ in a })
+        case "capture_photo":
+            reply(["id": id, "ok": true, "jpeg": try capturePhoto()])
         default:
             throw HelperError(message: "unknown_command")
         }
