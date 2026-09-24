@@ -6,6 +6,7 @@ import type { Store } from "../storage/store.ts";
 import { FALLBACK_REPLY, parseReply, type Reply } from "./output.ts";
 import { buildMessages, buildSystemPrompt, factsForPrompt, recentPhrases, type PromptParts } from "./prompt.ts";
 import { modelSeesCrisis } from "./crisis-check.ts";
+import { withTurnBudget } from "../model/budget.ts";
 import { emojiRecently, userEnergy } from "./energy.ts";
 import { looksLikeCrisis } from "./safety.ts";
 import { localDate } from "./time.ts";
@@ -67,9 +68,18 @@ export class Companion {
     return completion;
   }
 
-  async handle(input: { text: string; image?: ImageInput }): Promise<TurnResult> {
+  /** One reply, and the memory and summary work it sets off, within one spending cap. */
+  handle(input: { text: string; image?: ImageInput }): Promise<TurnResult> {
+    return withTurnBudget(() => this.reply(input));
+  }
+
+  private async reply(input: { text: string; image?: ImageInput }): Promise<TurnResult> {
     const { store, model, parts, timeZone } = this.deps;
-    if (input.image && !model.vision) throw new Error(`${model.name} cannot read images`);
+    // The stored message keeps the user's words and the image flag; only the prompt gets the note.
+    const seen =
+      input.image && !model.vision
+        ? { text: [input.text, "（用户发了一张图，但你现在用的模型看不了图，跟用户说一声）"].filter(Boolean).join("\n") }
+        : input;
 
     const now = this.deps.now?.() ?? new Date();
     const history = store.recentMessages(this.deps.historyMessages);
@@ -90,7 +100,7 @@ export class Companion {
     const summary = memoryEnabled ? store.getSetting(SUMMARY_SETTING) : null;
     const energy = userEnergy({ text: input.text, image: Boolean(input.image) });
     const prompt = (crisis: boolean) =>
-      buildMessages(buildSystemPrompt(parts, { now, timeZone, memoryEnabled, facts, crisis, recent: recentPhrases(history), summary, energy, emojiRecently: emojiRecently(history) }), history, input);
+      buildMessages(buildSystemPrompt(parts, { now, timeZone, memoryEnabled, facts, crisis, recent: recentPhrases(history), summary, energy, emojiRecently: emojiRecently(history) }), history, seen);
     let reply = await this.generate(prompt(crisis));
     if (check && (await check)) {
       crisis = true;
@@ -152,7 +162,11 @@ export class Companion {
    * reached WeChat isn't remembered as said. Throws rather than returning the
    * fallback reply: 「你再说一遍？」 makes no sense when nobody spoke.
    */
-  async initiate(note: string): Promise<Initiative> {
+  initiate(note: string): Promise<Initiative> {
+    return withTurnBudget(() => this.writeFirst(note));
+  }
+
+  private async writeFirst(note: string): Promise<Initiative> {
     const { store, parts, timeZone } = this.deps;
     const now = this.deps.now?.() ?? new Date();
     const history = store.recentMessages(this.deps.historyMessages);

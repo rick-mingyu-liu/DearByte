@@ -17,7 +17,7 @@ What could make DearByte better, roughly in the order worth doing. [how-it-works
 | Bake-off cases from real chats | The best test cases came from live messages (「在干嘛」「今天下午还挺忙碌」). Add a few each week, especially ones where she sounded off. | S |
 | Watch the tsundere balance | Too much 「哼」「才不是」 turns into a routine. Count those markers in the bake-off, the way warmth and emojis are counted now. | S |
 | Photo bake-off | Photo replies are untested with the current persona. It needs 2–3 real photos in `data/test-images/`. | S |
-| A stronger model for replies only | deepseek-flash sometimes goes generic. A bigger model for the reply, with flash still doing memory, summary and the safety check, would cost a few times more per message. Compare in the bake-off first. | M |
+| A stronger model for replies only | deepseek-flash sometimes goes generic. Any provider can now be set, but one model does everything. A second setting for the reply model, with a cheap one still doing memory, summary and the safety check, would help. Compare with `npm run bakeoff -- --provider … --model …` first. | S |
 
 ## Memory
 
@@ -31,6 +31,7 @@ What could make DearByte better, roughly in the order worth doing. [how-it-works
 
 | What | Why | Size |
 |---|---|---|
+| A daily spending cap too | The $1 cap is per reply. A runaway loop of many cheap replies isn't capped. A daily total (for example $5) would close that. | S |
 | Start at login and restart on crash | Today the runner is started by hand. A `launchd` agent would bring 小拜 back after a reboot or a crash. | S |
 | Set up the phone alert | `COMPANION_ALERT_URL` (ntfy) is built but not configured. The Mac notification alone is easy to miss. | S |
 | Tests for the Swift helper | The helper is only tested by hand against real WeChat. Saved snapshots of the chat would let its parsing and alignment be tested offline. | M |
@@ -48,6 +49,6 @@ What could make DearByte better, roughly in the order worth doing. [how-it-works
 | What | Why | Size |
 |---|---|---|
 | An official channel | The WeChat automation breaks Tencent's rules and is tied to WeChat 3.8.4. A mini program, an app, or iLink would reuse the persona, memory and safety code. | L |
-| Registration and privacy | A public companion in China needs 生成式AI备案 registration, clear data handling, and possibly a model that isn't DeepSeek, depending on where users are. | L |
+| Registration and privacy | A public companion in China needs 生成式AI备案 registration and clear data handling. The model provider can now be switched to fit where users are. | L |
 | Packaging | npm or a Homebrew tap, a first-run setup wizard, and a warning to use a separate WeChat account. | M |
 | Safety review | Grow the crisis test set, and have a person review how 小拜 handles hard conversations before strangers use it. | M |

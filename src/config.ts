@@ -1,11 +1,12 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { resolveModel, type ModelSettings } from "./model/providers.ts";
 
 export const ROOT = new URL("..", import.meta.url).pathname;
 
 export type Config = {
-  apiKey: string | null;
-  model: string;
+  /** Which provider, model, key and prices; or what's missing from .env. */
+  model: ModelSettings | { problem: string };
   dbPath: string;
   timeZone: string;
   historyMessages: number;
@@ -37,8 +38,7 @@ function nonNegative(value: string | undefined, fallback: number): number {
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const merged = { ...readDotEnv(join(ROOT, ".env")), ...env };
   return {
-    apiKey: merged.DEEPSEEK_API_KEY || null,
-    model: merged.DEEPSEEK_MODEL || "deepseek-flash",
+    model: resolveModel(merged),
     dbPath: merged.COMPANION_DB || join(ROOT, "data/companion.sqlite"),
     timeZone: merged.COMPANION_TZ || Intl.DateTimeFormat().resolvedOptions().timeZone,
     historyMessages: Number(merged.COMPANION_HISTORY_MESSAGES || 40),

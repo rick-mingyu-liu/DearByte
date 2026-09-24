@@ -24,9 +24,9 @@ import { filmChannelLine, filmCompanionLine } from "./film.ts";
 import { loadConfig, ROOT } from "./config.ts";
 import { applyRetention } from "./memory/summary.ts";
 import { loadContacts, saveContacts } from "./contacts.ts";
-import { COMMON_HELP, describeEvent, describeReplyEvent, log, runSharedCommand } from "./console.ts";
-import { DeepSeekModel } from "./model/deepseek.ts";
+import { COMMON_HELP, describeEvent, describeModel, describeReplyEvent, log, runSharedCommand } from "./console.ts";
 import { FakeModel } from "./model/fake.ts";
+import { createModel, type ModelSettings } from "./model/providers.ts";
 import type { ChatModel } from "./model/provider.ts";
 import { Store } from "./storage/store.ts";
 
@@ -64,8 +64,8 @@ async function main() {
   const config = loadConfig();
   const argv = process.argv.slice(2);
   const fake = argv.includes("--fake");
-  if (!fake && !config.apiKey) {
-    console.error("缺少 DEEPSEEK_API_KEY（写在 .env 里），或用 --fake 测试。");
+  if (!fake && "problem" in config.model) {
+    console.error(`${config.model.problem}\n或用 --fake 测试。`);
     process.exit(1);
   }
 
@@ -151,7 +151,7 @@ async function main() {
   const film = argv.includes("--film");
   if (film && process.stdout.isTTY) console.clear();
 
-  const model: ChatModel = fake ? new FakeModel() : new DeepSeekModel(config.apiKey!, config.model);
+  const model: ChatModel = fake ? new FakeModel() : createModel(config.model as ModelSettings);
   const companion = new Companion({
     store,
     model,
@@ -184,7 +184,7 @@ async function main() {
     film
       ? console.log(`💗 小拜 · DearByte   ${store.memoryEnabled() ? `记得 ${store.activeFacts().length} 件关于你的事` : ""}\n`)
       : log(
-      `模型 ${model.name}${fake ? "（假模型，会发出标明是假的回复）" : ""} · ${store.messageCount()} 条聊天记录 · ` +
+      `模型 ${describeModel(config.model, fake)}${fake ? "（假模型，会发出标明是假的回复）" : ""} · ${store.messageCount()} 条聊天记录 · ` +
         `长期记忆${store.memoryEnabled() ? `开启（${store.activeFacts().length} 条）` : "关闭"} · ` +
         `主动消息${proactiveEnabled() ? "开启" : "关闭"} · 时区 ${config.timeZone} · 微信「${names.join("」「")}」· ${channel.mode === "draft" ? "草稿模式（不发送）" : channel.paused ? "已暂停" : "自动回复"}`,
     );

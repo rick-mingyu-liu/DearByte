@@ -48,6 +48,8 @@ Create `.env` in the project root with your API key. This file is ignored by Git
 DEEPSEEK_API_KEY=your_API_key
 ```
 
+OpenAI, Claude, Gemini, Qwen, Kimi, GLM, OpenRouter and local Ollama work too; see [Configuration](docs/guide.en.md#configuration-env). Each reply costs at most $1 by default.
+
 ```bash
 npm run companion
 ```
@@ -70,10 +72,12 @@ The WeChat connection uses macOS Accessibility to operate the desktop client. It
 
 This is an experimental demo route with a risk of account restrictions. Use a test account. See the [English user guide](docs/guide.en.md) for setup, draft mode, and pause/resume controls.
 
+First, [set the allowed contact](docs/guide.en.md#set-the-allowed-contact): open the target chat and run `npm run dearbyte -- --chat "Chat name" --draft`. Later, edit `data/contacts.json` to add aliases for that same person, then restart. Only one contact is currently supported.
+
 ## Data and privacy
 
 - **Long-term memory is off by default.** When enabled, memories can be inspected, deleted or exported. Chat history is separate: disabling memory does not stop history storage.
-- **Local storage, cloud generation.** History, memories, summaries and settings live in the Git-ignored `data/` directory. Relevant conversation context is sent to DeepSeek to generate replies; photos are used only for the current turn.
+- **Local storage, cloud generation.** History, memories, summaries and settings live in the Git-ignored `data/` directory. Relevant conversation context is sent to the model provider you configure (DeepSeek by default) to generate replies; photos are used only for the current turn.
 - **History is retained for 30 days by default.** With memory enabled, older messages are summarized before deletion. Clearing history does not also clear memories.
 - **Tencent still carries WeChat messages.** Deleting local data does not delete messages already sent in WeChat or data the model provider may retain.
 

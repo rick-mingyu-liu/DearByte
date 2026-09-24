@@ -47,6 +47,36 @@ Then chat with 小拜 from your phone. The terminal shows each message, each bub
 | `/memory …`, `/history clear` | Same as in the simulator (below) |
 | `/status`, `/help`, `/quit` | Show status, show help, quit |
 
+### Set the allowed contact
+
+1. In the main Mac WeChat window signed in as Xiaobai, open the one-to-one conversation Xiaobai should answer.
+2. Use the name shown at the top of that chat, quoted in full (including any spaces):
+
+```bash
+npm run dearbyte -- --chat "Alex Zhang" --draft
+```
+
+On first setup, the runner checks the open chat's name and creates `data/contacts.json`. `--draft` generates replies without sending them so you can check the setup. Once ready, quit and run `npm run dearbyte` to enable automatic replies.
+
+To allow **other display names for the same person**, edit `data/contacts.json` under the project root:
+
+```json
+{
+  "contacts": [
+    {
+      "id": "me",
+      "names": ["张三", "Alex Zhang"]
+    }
+  ]
+}
+```
+
+Replace these example aliases with the remark or nickname WeChat actually displays for that one person. `names` matches the title at the top of the chat, not the person's WeChat ID. The `id` field is an internal identifier; you can leave it as `me`. See [contacts.example.json](../contacts.example.json).
+
+Save, quit, and restart with `npm run dearbyte`. Once the file exists, `--chat` does not append or overwrite contacts: edit the file directly. Only one contact is supported. Do not list different people as aliases or add a second contact object. History and memory are not isolated per contact yet; changing the allowlist does not create a fresh, separate conversation.
+
+If Xiaobai keeps waiting, check that the current chat title exactly matches an entry in `names` and that you restarted after editing. The file is ignored by Git because it contains real names.
+
 How it behaves:
 - **Who gets replies:** only the one-to-one chat listed in `data/contacts.json`. The file is gitignored because it holds real names; `contacts.example.json` shows the format. List every name WeChat may show at the top of that chat (the remark, the nickname, old names), so renaming the chat doesn't stop replies. Edit the file and restart to change it. Only one contact is supported for now: several would need separate history and memory per person, and a way to switch chats.
 - **Other chats:** if you open another chat on the Mac, 小拜 waits until it's back. Messages already in the chat when it starts are never answered. If a second person speaks in the chat (a group), it pauses.
@@ -107,14 +137,31 @@ message ─► SQLite (history) ─► prompt ─► deepseek-flash ─► check
 
 | Variable | Default |
 |---|---|
-| `DEEPSEEK_API_KEY` | required, unless you use `--fake` |
-| `DEEPSEEK_MODEL` | `deepseek-flash` (supports vision) |
+| `COMPANION_PROVIDER` | `deepseek` (default). Also `openai`, `anthropic`, `gemini`, `qwen`, `moonshot` (Kimi), `zhipu` (GLM), `openrouter`, `ollama` (local), or `custom` (any OpenAI-compatible API). |
+| `COMPANION_MODEL` | The model name. DeepSeek defaults to `deepseek-flash` (the old `DEEPSEEK_MODEL` still works); required for every other provider. |
+| `COMPANION_API_KEY` | The key. Each provider's own variable works too: `DEEPSEEK_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `DASHSCOPE_API_KEY`, `MOONSHOT_API_KEY`, `ZHIPU_API_KEY`, `OPENROUTER_API_KEY`. Ollama needs none, and neither does `--fake`. |
+| `COMPANION_BASE_URL` | Overrides the API address; required for `custom`. |
+| `COMPANION_PRICE_INPUT`, `COMPANION_PRICE_OUTPUT`, `COMPANION_PRICE_CACHED` | USD per 1M tokens, as the provider publishes them. Built in for DeepSeek; Ollama is free. Required for any other paid model, or the spending cap can't work and the runner won't start. |
+| `COMPANION_VISION` | `true` or `false`: whether the model reads images. Guessed from the provider by default. Without vision, 小拜 tells the user she can't see the photo. |
+| `COMPANION_MAX_COST_PER_REPLY` | `1`. The most one reply may cost in USD, including repairs, the safety check, memory and the summary. Near the limit the output cap shrinks; past it, no more model calls. `0` turns it off. |
 | `COMPANION_DB` | `data/companion.sqlite` |
 | `COMPANION_ALERT_URL` | Optional. An ntfy topic URL for alerts on your phone. |
 | `COMPANION_TZ` | The Mac's time zone. Used for 小拜's sense of time, dates like 下周六, and when it may write first. Set it to the chat partner's zone (e.g. `Asia/Shanghai`) if the Mac is elsewhere, or 小拜 may write to them at night. |
 | `COMPANION_HISTORY_MESSAGES` | `40` (the last 20 turns, verbatim). Older messages are folded into a rolling summary when memory is on. |
 | `COMPANION_HISTORY_DAYS` | `30`. Chat history older than this is deleted, once it's in the summary (memory on) or right away (memory off). `0` keeps everything. |
 | `COMPANION_WECHAT_MEDIA_DIR` | unset. The `…/<小拜 account>/Message/MessageTemp/<chat>/Image` folder inside WeChat's container; needed for photos. |
+
+To use another provider, for example Claude (prices as the provider publishes them):
+
+```dotenv
+COMPANION_PROVIDER=anthropic
+COMPANION_MODEL=<model name from the provider's docs>
+ANTHROPIC_API_KEY=<your key>
+COMPANION_PRICE_INPUT=…
+COMPANION_PRICE_OUTPUT=…
+```
+
+小拜's persona was tuned on DeepSeek, so another model may sound different. Compare first with `npm run bakeoff -- --provider anthropic --model <name>`.
 
 ## Development
 
@@ -140,7 +187,7 @@ native/wechat-desktop/   Swift Accessibility helper (JSON lines over stdin/stdou
 src/companion/           turn pipeline, prompt building, reply validation, safety check
 src/memory/extract.ts    fact extraction and validation
 src/storage/store.ts     SQLite (node:sqlite): messages, facts, settings
-src/model/               DeepSeek client and fake model
+src/model/               provider clients (OpenAI-compatible, Anthropic), spending cap, fake model
 tools/bakeoff.ts         persona bake-off
 tools/inspect-wechat.swift  read-only WeChat accessibility probe
 docs/how-it-works.md     start here: how the whole system works
@@ -152,6 +199,6 @@ docs/                    provenance and design notes
 
 ## Data and privacy
 
-Everything is stored locally in `data/` (gitignored): chat history (kept 30 days by default, see `COMPANION_HISTORY_DAYS`), memories, a rolling summary of older chat, and settings. Each message is sent to DeepSeek to generate the reply; photos are sent only for the current turn. In WeChat mode, the runner reads only the chat listed in `data/contacts.json` and its image folder, and Tencent carries the messages as it does for any chat. Deleting local data doesn't delete messages already sent in WeChat, or anything DeepSeek keeps on its side.
+Everything is stored locally in `data/` (gitignored): chat history (kept 30 days by default, see `COMPANION_HISTORY_DAYS`), memories, a rolling summary of older chat, and settings. Each message is sent to the configured model provider (DeepSeek by default) to generate the reply; photos are sent only for the current turn. In WeChat mode, the runner reads only the chat listed in `data/contacts.json` and its image folder, and Tencent carries the messages as it does for any chat. Deleting local data doesn't delete messages already sent in WeChat, or anything the provider keeps on its side.
 
 Persona ideas are adapted from [狗头军师](https://github.com/shengjidaguai-china/goutoujunshi) (MIT). See [docs/upstream-provenance.md](upstream-provenance.md).

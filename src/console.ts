@@ -6,6 +6,7 @@ import type { ReplyEvent } from "./channels/reply-loop.ts";
 import type { CompanionEvent } from "./companion/companion.ts";
 import { localDate } from "./companion/time.ts";
 import { ROOT } from "./config.ts";
+import type { ModelSettings } from "./model/providers.ts";
 import type { Store } from "./storage/store.ts";
 
 export const COMMON_HELP = `  /memory               列出记得的事
@@ -118,3 +119,11 @@ export async function runSharedCommand(line: string, ctx: { store: Store; timeZo
   }
   return false;
 }
+
+/** "OpenAI gpt-x · 每条回复最多 $1", for the status line. */
+export function describeModel(settings: ModelSettings | { problem: string }, fake: boolean): string {
+  if (fake || "problem" in settings) return "fake";
+  const cap = settings.maxCostPerReply > 0 ? `每条回复最多 $${settings.maxCostPerReply}` : "不限每条花费";
+  return `${settings.label} ${settings.model} · ${cap}`;
+}
+

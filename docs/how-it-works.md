@@ -32,7 +32,7 @@ It's written for someone reading the code for the first time. The details live i
    └─ watchdog          notifies you when 小拜 goes quiet
         │
         ▼
- DeepSeek (deepseek-flash): the cheapest model that can also see photos
+ The model: DeepSeek deepseek-flash by default; any provider in .env
 ```
 
 It's a fixed pipeline, not an "agent": each message goes through the same steps in the same order. That keeps it predictable, cheap and easy to test (about 100 tests, all runnable offline with a fake model).
@@ -47,7 +47,7 @@ Here is what happens when you send 「今天好累」 ("so tired today") at 21:0
 | 2 | **Helper** (`main.swift`) | Once a second the runner asks "what's in the chat?". The helper reads the chat title and every row title through Accessibility, and returns `{chat, rows}`. | ~50 ms |
 | 3 | **Channel** (`channel.ts`) | Checks the open chat is one of your names in `contacts.json`, or it replies to nobody. Lines the new snapshot up with the last one; the extra row at the bottom is new. Parses it as text from you. If a second person ever speaks, it's a group chat, so it pauses. | instant |
 | 4 | **Reply loop** (`reply-loop.ts`) | Waits 1.5 s for more messages, so 「今天好累」「不想动」 become one turn. If 小拜 is already answering, the new message waits its turn. | 1.5 s |
-| 5 | **Companion** (`companion.ts`) | Saves your message. Checks for crisis keywords, and starts the model crisis check at the same time as the reply. Loads your facts, style rules and the summary. Builds the prompt and asks DeepSeek for `{"bubbles": [...]}`. Repairs bad output, cuts to 2 bubbles, saves the reply. | ~1.2 s |
+| 5 | **Companion** (`companion.ts`) | Saves your message. Checks for crisis keywords, and starts the model crisis check at the same time as the reply. Loads your facts, style rules and the summary. Builds the prompt and asks the model for `{"bubbles": [...]}`. Repairs bad output, cuts to 2 bubbles, saves the reply. | ~1.2 s |
 | 6 | **Reply loop** again | Holds the first bubble until at least 1.5–3.5 s after your message, as if reading. Then it sends each bubble, pausing about 150 ms per character between them, as if typing. | 2–5 s |
 | 7 | **Helper** again | Checks the right chat is open and the box is empty, fills in the bubble, presses Return, and waits for a `MeSaid:` row to confirm. A bubble it can't confirm is never resent. | ~0.5 s per bubble |
 | 8 | **Memory** (background) | A second, cheaper call looks for facts in 「今天好累」 (probably none). If 10 more messages have left the 40-message window, it folds them into the summary. You never wait for this. | ~1–2 s |
@@ -107,9 +107,11 @@ Then it fills in the text, presses Return, and confirms that a new `MeSaid:<text
 
 **Cost.** About $0.0005–0.001 per message in total (reply, memory, safety check), so roughly a cent for a long evening of chat.
 
+**Any provider, capped at $1 a reply.** The model sits behind a small interface (`src/model/`). One client speaks OpenAI's chat completions API, which covers OpenAI, DeepSeek, Gemini, Qwen, Kimi, GLM, OpenRouter, Ollama and any compatible server. A second client handles Anthropic's Claude. If a model rejects a parameter (older `max_tokens`, a fixed temperature, JSON mode), the client drops or renames it once and remembers. Every model is wrapped in a spending cap (`src/model/budget.ts`). Everything one reply sets off shares one tab: the reply, a repair, the crisis check, memory and the summary. Before each call it reserves the worst case: the input estimated at one token per character, plus the full output cap. If that doesn't fit under `COMPANION_MAX_COST_PER_REPLY` ($1 by default), the output cap shrinks. If even 200 output tokens don't fit, the call isn't made. A call that reports no usage, times out or fails with a 5xx is charged its full reservation, since it may have been billed; only a 4xx refusal is free. This is why a paid model without known prices won't start.
+
 ## 3. The prompt
 
-The system prompt is built in this order. The stable parts come first, so DeepSeek's prompt cache covers them; typically 70–90% of input tokens are cache hits.
+The system prompt is built in this order. The stable parts come first, so the provider's prompt cache covers them; typically 70–90% of input tokens are cache hits.
 
 | Part | Source | What it does |
 |---|---|---|
@@ -233,7 +235,7 @@ Commands while running: `/pause`, `/resume`, `/proactive on|off`, `/memory`, `/m
 | A reply is saved before it's sent | If sending fails, 小拜 "remembers" saying something you never saw. (Messages she writes first are already saved only after sending.) | Yes, small |
 | Model quirks | deepseek-flash sometimes repeats itself (3 of 8 test good-mornings mentioned 「今天周四」) or goes generic. Rules can't catch everything. | Partly: more examples, or a stronger model at a higher cost |
 | Memory has a ceiling | All facts go in every prompt, so past ~100 it needs search. The 400-character summary loses detail over weeks. | Yes |
-| Chat goes to DeepSeek | Your messages are processed by a China-based API. | Yes: switch provider |
+| Chat goes to a cloud model | By default your messages go to DeepSeek, a China-based API. | Yes: set another provider in `.env`, or Ollama to keep everything on the Mac |
 | Safety is a model, not a person | The check can miss things, and 小拜 can't call anyone. It gives hotline numbers. | No. It's a companion, not a service. |
 | Not sellable as is | Selling needs an official route (a mini program, an app, or iLink) and 生成式AI备案 registration. | Yes, but it's a different build |
 

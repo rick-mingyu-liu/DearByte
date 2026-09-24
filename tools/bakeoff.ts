@@ -4,6 +4,7 @@
 //   npm run bakeoff
 //   npm run bakeoff -- --case cat-photo
 //   npm run bakeoff -- --model deepseek-v4-pro --runs 3
+//   npm run bakeoff -- --provider openai --model <model>   # key and prices from .env
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -15,7 +16,7 @@ import { userEnergy } from "../src/companion/energy.ts";
 import { loadConfig, ROOT } from "../src/config.ts";
 import type { Fact, StoredMessage } from "../src/domain.ts";
 import { loadImage } from "../src/media/images.ts";
-import { DeepSeekModel } from "../src/model/deepseek.ts";
+import { createModel } from "../src/model/providers.ts";
 
 type Case = {
   id: string;
@@ -26,10 +27,11 @@ type Case = {
 };
 
 function parseArgs(argv: string[]) {
-  const opts = { model: loadConfig().model, case: null as string | null, runs: 1 };
+  const opts = { provider: null as string | null, model: null as string | null, case: null as string | null, runs: 1 };
   for (let i = 0; i < argv.length; i += 2) {
     const [flag, value] = [argv[i], argv[i + 1]];
-    if (flag === "--model") opts.model = value;
+    if (flag === "--provider") opts.provider = value;
+    else if (flag === "--model") opts.model = value;
     else if (flag === "--case") opts.case = value;
     else if (flag === "--runs") opts.runs = Number(value);
     else throw new Error(`Unknown option ${flag}`);
@@ -62,9 +64,13 @@ const toHistory = (c: Case): StoredMessage[] =>
 
 async function main() {
   const opts = parseArgs(process.argv.slice(2));
-  const config = loadConfig();
-  if (!config.apiKey) throw new Error("DEEPSEEK_API_KEY not set. Add it to .env (gitignored).");
-  const model = new DeepSeekModel(config.apiKey, opts.model);
+  const config = loadConfig({
+    ...process.env,
+    ...(opts.provider ? { COMPANION_PROVIDER: opts.provider } : {}),
+    ...(opts.model ? { COMPANION_MODEL: opts.model } : {}),
+  });
+  if ("problem" in config.model) throw new Error(config.model.problem);
+  const model = createModel(config.model);
   const parts = loadPromptParts(ROOT);
   let cases: Case[] = JSON.parse(readFileSync(join(ROOT, "tools/bakeoff-cases.json"), "utf8")).cases;
   if (opts.case) cases = cases.filter((c) => c.id === opts.case);
@@ -109,7 +115,7 @@ async function main() {
       try {
         const { text, usage, ms } = await model.complete(messages, { json: true });
         const parsed = parseReply(text);
-        const cost = model.cost(usage);
+        const cost = model.cost(usage) ?? 0;
         total += cost;
         const problems = parsed.ok ? [] : parsed.problems;
         const bubbles = parsed.ok ? parsed.reply.bubbles : (parsed.salvage?.bubbles ?? []);

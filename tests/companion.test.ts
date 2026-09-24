@@ -120,3 +120,17 @@ test("chat replies are cut to two bubbles; crisis replies keep all of theirs", a
   expect(events).toContainEqual({ type: "reply_trimmed", dropped: ["三"] });
   expect((await companion.handle({ text: "我不想活了" })).reply.bubbles).toHaveLength(3);
 });
+
+test("a photo sent to a model that can't see images becomes a note, not an error", async () => {
+  const store = Store.open(":memory:");
+  const model = Object.assign(new FakeModel([JSON.stringify({ bubbles: ["这个模型看不了图"] })]), { vision: false });
+  const companion = new Companion({ store, model, parts: loadPromptParts(ROOT), timeZone: "UTC", historyMessages: 40 });
+  const turn = await companion.handle({ text: "看", image: { mimeType: "image/jpeg", bytes: new Uint8Array([1, 2, 3]) } });
+  expect(turn.reply.bubbles).toEqual(["这个模型看不了图"]);
+  const sent = JSON.stringify(model.calls[0].messages.at(-1));
+  expect(sent).toContain("看不了图");
+  expect(sent).not.toContain("image_url");
+  // Stored as the user sent it: their words and the image flag, not the note.
+  expect(turn.userMessage.text).toBe("看");
+  expect(turn.userMessage.hasImage).toBe(true);
+});
