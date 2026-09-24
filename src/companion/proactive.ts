@@ -30,15 +30,23 @@ const StateSchema = z.object({
   lastAt: z.string().nullable(),
 });
 
-/** The saved state, or null (a fresh day) when missing or unreadable, so a bad value can't jam the feature. */
+/**
+ * The saved state, or a fresh day when it's missing or unreadable, so a bad
+ * value can't jam the feature. A readable lastAt is kept even then: it's what
+ * stops a second nudge while the last one is unanswered.
+ */
 export function parseProactiveState(raw: string | null): ProactiveState | null {
   if (!raw) return null;
+  let json: unknown;
   try {
-    const parsed = StateSchema.safeParse(JSON.parse(raw));
-    return parsed.success ? parsed.data : null;
+    json = JSON.parse(raw);
   } catch {
     return null;
   }
+  const parsed = StateSchema.safeParse(json);
+  if (parsed.success) return parsed.data;
+  const lastAt = (json as { lastAt?: unknown } | null)?.lastAt;
+  return typeof lastAt === "string" ? { date: "", morningAt: null, thinkingAt: null, sent: [], lastAt } : null;
 }
 
 export const PROACTIVE_STATE_SETTING = "proactive_state";

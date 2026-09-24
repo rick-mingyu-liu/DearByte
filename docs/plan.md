@@ -66,8 +66,8 @@ Record the results in `docs/design/wechat-transport.md`.
 - [ ] **Stickers from WeChat's own packs** on a dedicated Mac: click the sticker panel by grid position (plan in [the transport notes](design/wechat-transport.md#stickers-and-pictures-probed-2026-09-24)).
 - [x] **Proactive messages** (2026-09-24): good mornings, event luck and follow-ups, check-ins after a silence; at most 2 a day, never at night, never double-texting (`src/companion/proactive.ts`).
 - [ ] **Memory search:** once facts pass about 100, retrieve the relevant ones (SQLite FTS5 over facts and old messages) instead of putting all of them in the prompt.
-- [ ] **Learning from feedback:** notice when the user pushes back on how 小拜 talks (「别叫我宝宝」「说话别这么长」) and keep it as a lasting style rule, reviewed like other memories.
-- [ ] **Rolling summary:** today the prompt gets the last 40 messages verbatim. Add a short running summary so longer relationships stay coherent without prompt costs growing.
+- [x] **Rolling summary** (2026-09-24): messages leaving the 40-message window are folded, 10 at a time, into a summary of up to 400 characters kept in the prompt (`src/memory/summary.ts`). `/history clear` resets it; forgetting a fact drops its text.
+- [x] **Learning from feedback** (2026-09-24): requests about how 小拜 talks become `style` memories, used as standing rules.
 - [ ] **Forgetting:** `/memory forget` should also remove the fact from recent history sent to the model, not only from the fact table.
 - [ ] **Memory claims:** 小拜 sometimes says 「我都记着」 when memory is off. Tighten the persona and add a bake-off case.
 - [ ] **Crisis detection:** add a cheap model-based check next to the keywords. Keep the keywords as a fallback.

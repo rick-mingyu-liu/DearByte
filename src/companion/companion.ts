@@ -1,5 +1,6 @@
 import type { ChatMessage, ImageInput, StoredMessage } from "../domain.ts";
 import { extractFacts, type ExtractionOutcome } from "../memory/extract.ts";
+import { SUMMARY_SETTING, updateSummary, type SummaryOutcome } from "../memory/summary.ts";
 import type { ChatModel, Completion } from "../model/provider.ts";
 import type { Store } from "../storage/store.ts";
 import { FALLBACK_REPLY, parseReply, type Reply } from "./output.ts";
@@ -16,7 +17,8 @@ export type CompanionEvent =
   | { type: "reply_invalid"; problems: string[]; action: "repair" | "salvage" | "fallback" }
   | { type: "reply_trimmed"; dropped: string[] }
   | { type: "memory"; outcome: ExtractionOutcome }
-  | { type: "memory_error"; message: string };
+  | { type: "memory_error"; message: string }
+  | { type: "summary"; outcome: NonNullable<SummaryOutcome> };
 
 /** A message 小拜 may send first; `commit` stores what was actually sent. */
 export type Initiative = { bubbles: string[]; commit: (sent: string[]) => void };
@@ -66,7 +68,8 @@ export class Companion {
     const crisis = looksLikeCrisis(input.text);
     this.emit({ type: "context", historyMessages: history.length, facts: facts.length, memoryEnabled, crisis, image: Boolean(input.image) });
 
-    const system = buildSystemPrompt(parts, { now, timeZone, memoryEnabled, facts, crisis, recent: recentPhrases(history) });
+    const summary = memoryEnabled ? store.getSetting(SUMMARY_SETTING) : null;
+    const system = buildSystemPrompt(parts, { now, timeZone, memoryEnabled, facts, crisis, recent: recentPhrases(history), summary });
     const messages = buildMessages(system, history, input);
     let reply = await this.generate(messages);
     // A third bubble reads as an AI over-explaining. Crisis replies keep all of
@@ -97,6 +100,12 @@ export class Companion {
             this.emit({ type: "memory", outcome });
             return outcome;
           })
+          .then(async (outcome) => {
+            // Messages that just left the window get folded into the summary.
+            const folded = await updateSummary({ model: trackedModel, store, window: this.deps.historyMessages, timeZone });
+            if (folded) this.emit({ type: "summary", outcome: folded });
+            return outcome;
+          })
           .catch((err: Error) => {
             // Extraction failure is visible but never fails the reply.
             this.emit({ type: "memory_error", message: err.message });
@@ -120,7 +129,8 @@ export class Companion {
     const history = store.recentMessages(this.deps.historyMessages);
     const memoryEnabled = store.memoryEnabled();
     const facts = memoryEnabled ? factsForPrompt(store.activeFacts(), localDate(now, timeZone)) : [];
-    const system = buildSystemPrompt(parts, { now, timeZone, memoryEnabled, facts, crisis: false, recent: recentPhrases(history) });
+    const summary = memoryEnabled ? store.getSetting(SUMMARY_SETTING) : null;
+    const system = buildSystemPrompt(parts, { now, timeZone, memoryEnabled, facts, crisis: false, recent: recentPhrases(history), summary });
     const text =
       `（系统提示，不是用户说的）用户现在没有发消息，是你主动找用户。${note}\n` +
       "像朋友随手发的微信那样开个头：1 条，最多 2 条，每条很短。不要说“提醒你”“我记得你说过”“根据记录”，不要用“在吗”开头。";

@@ -96,7 +96,7 @@ export async function extractFacts(opts: {
         content: buildInput({ ...opts, facts: opts.store.activeFacts() }),
       },
     ],
-    { json: true, temperature: 0, maxTokens: 600 },
+    { json: true, temperature: 0, maxTokens: 1_500 }, // room for deepseek-flash to reason first
   );
 
   let parsed: z.infer<typeof CandidatesSchema>;

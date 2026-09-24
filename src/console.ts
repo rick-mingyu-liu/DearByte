@@ -46,6 +46,8 @@ export function describeEvent(e: CompanionEvent): string | null {
     }
     case "memory_error":
       return `记忆整理失败（不影响回复）：${e.message}`;
+    case "summary":
+      return `更早的 ${e.outcome.folded} 条聊天并进了摘要（${e.outcome.chars} 字）`;
   }
 }
 

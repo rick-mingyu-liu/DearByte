@@ -124,13 +124,43 @@ export class Store {
     return rows.reverse().map(toMessage);
   }
 
+  /** Messages with afterId < id < beforeId, oldest first. */
+  messagesBetween(afterId: number, beforeId: number): StoredMessage[] {
+    const rows = this.db
+      .prepare("SELECT * FROM messages WHERE id > ? AND id < ? ORDER BY id")
+      .all(afterId, beforeId) as MessageRow[];
+    return rows.map(toMessage);
+  }
+
   messageCount(): number {
     return (this.db.prepare("SELECT COUNT(*) AS n FROM messages").get() as { n: number }).n;
   }
 
-  /** Deletes chat history only. Facts stay (their source link becomes null). */
+  /** Deletes chat history and its rolling summary. Facts stay (their source link becomes null). */
   clearHistory(): number {
+    // Ids restart once the table is empty, so the summary's position goes too.
+    this.db.prepare("DELETE FROM settings WHERE key IN ('summary_text', 'summary_upto')").run();
     return Number(this.db.prepare("DELETE FROM messages").run().changes);
+  }
+
+  /**
+   * Drops the rolling summary. The summary is prose that may mention anything,
+   * so forgetting a fact drops it too; later messages rebuild it.
+   */
+  clearSummary(): void {
+    this.db.prepare("DELETE FROM settings WHERE key IN ('summary_text')").run();
+  }
+
+  /** Several settings in one transaction. */
+  setSettings(values: Record<string, string>): void {
+    this.db.exec("BEGIN");
+    try {
+      for (const [k, v] of Object.entries(values)) this.setSetting(k, v);
+      this.db.exec("COMMIT");
+    } catch (err) {
+      this.db.exec("ROLLBACK");
+      throw err;
+    }
   }
 
   getSetting(key: string): string | null {
@@ -211,6 +241,8 @@ export class Store {
          WHERE id = ? AND status = 'active'`,
       )
       .run(now, now, id);
-    return Number(result.changes) === 1;
+    const forgotten = Number(result.changes) === 1;
+    if (forgotten) this.clearSummary();
+    return forgotten;
   }
 }

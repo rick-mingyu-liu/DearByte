@@ -30,7 +30,9 @@ export class DeepSeekModel implements ChatModel {
         model: this.name,
         messages,
         temperature: opts.temperature ?? 1.0,
-        max_tokens: opts.maxTokens ?? 800,
+        // deepseek-flash reasons before answering and that counts here; a reply
+        // has used 722. Too low a cap returns an empty answer, not a short one.
+        max_tokens: opts.maxTokens ?? 2_000,
         ...(opts.json ? { response_format: { type: "json_object" } } : {}),
       }),
       signal: opts.signal ?? AbortSignal.timeout(30_000),

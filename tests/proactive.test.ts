@@ -167,6 +167,9 @@ test("only a message that went out holds back the next one", () => {
 test("a corrupt saved state starts a fresh day instead of jamming", () => {
   expect(parseProactiveState("{")).toBeNull();
   expect(parseProactiveState(JSON.stringify({ date: "x" }))).toBeNull();
+  // A broken state still remembers the unanswered nudge.
+  expect(parseProactiveState(JSON.stringify({ sent: "bad", lastAt: "2026-09-24T01:00:00Z" }))?.lastAt).toBe("2026-09-24T01:00:00Z");
+  expect(dayState(parseProactiveState(JSON.stringify({ lastAt: "L" })), "2026-09-24", () => 0.9).lastAt).toBe("L");
   expect(parseProactiveState(null)).toBeNull();
   const ok = state({ morningAt: 500 });
   expect(parseProactiveState(JSON.stringify(ok))).toEqual(ok);

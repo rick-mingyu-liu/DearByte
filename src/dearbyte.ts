@@ -104,8 +104,12 @@ async function main() {
 
   if (first) {
     // A typo here would leave 小拜 waiting for a chat that doesn't exist.
-    if (requested && open.chat && open.chat !== requested) {
-      fail(`微信当前打开的是「${open.chat}」，和 --chat「${requested}」不一样。先点开要回复的聊天，名字照顶部写。`);
+    if (requested && open.chat !== requested) {
+      fail(
+        open.chat
+          ? `微信当前打开的是「${open.chat}」，和 --chat「${requested}」不一样。先点开要回复的聊天，名字照顶部写。`
+          : `没读到微信里打开的聊天，没法确认「${requested}」写对了。先在 Mac 微信里点开这个聊天再运行。`,
+      );
     }
     contacts = [{ id: "me", names: [first] }];
     saveContacts(contactsPath, contacts);
