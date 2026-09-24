@@ -1,0 +1,6 @@
+.build/
+.env
+data/
+*.log
+/.omc
+node_modules/
