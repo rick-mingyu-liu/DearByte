@@ -1,6 +1,6 @@
 // When 小拜 messages first. A friend says good morning some days, wishes you
-// luck on the day of an exam, asks how it went that evening, and checks in
-// after a long silence. A friend also doesn't double-text, doesn't message at
+// luck on the day of an exam, asks how it went that evening, checks in after a
+// long silence, and sometimes just thinks of you in the afternoon. A friend also doesn't double-text, doesn't message at
 // night, and doesn't interrupt a conversation that just ended.
 
 import type { Fact, StoredMessage } from "../domain.ts";
@@ -11,6 +11,8 @@ export type ProactiveState = {
   date: string;
   /** Minutes after midnight for today's good morning, or null for none today. */
   morningAt: number | null;
+  /** Minutes after midnight when 小拜 may "think of you" today, or null. Missing in older saved state. */
+  thinkingAt?: number | null;
   /** Keys of what was sent today. */
   sent: string[];
   /** When the last proactive message went out (ISO), across days. */
@@ -29,12 +31,17 @@ export const QUIET_AFTER_CHAT_MS = 90 * 60_000;
 export const CHECKIN_AFTER_MS = 20 * 3_600_000;
 /** Chance of a good morning on a given day, so it isn't a daily ritual. */
 const MORNING_CHANCE = 0.6;
+/** Chance of a "thinking of you" message on a given day. */
+const THINKING_CHANCE = 0.7;
+/** A "thinking of you" message needs this much quiet first. */
+export const THINKING_AFTER_MS = 3 * 3_600_000;
 
 /** Today's state, starting a fresh day (with a new random morning time) when the date changed. */
 export function dayState(saved: ProactiveState | null, today: string, random: () => number): ProactiveState {
   if (saved?.date === today) return saved;
   const morningAt = random() < MORNING_CHANCE ? hm(8) + Math.floor(random() * 90) : null;
-  return { date: today, morningAt, sent: [], lastAt: saved?.lastAt ?? null };
+  const thinkingAt = random() < THINKING_CHANCE ? hm(13) + Math.floor(random() * 7 * 60) : null;
+  return { date: today, morningAt, thinkingAt, sent: [], lastAt: saved?.lastAt ?? null };
 }
 
 export function planProactive(ctx: {
@@ -75,6 +82,22 @@ export function planProactive(ctx: {
     return {
       key: "checkin",
       note: `用户已经${hours >= 48 ? `${Math.floor(hours / 24)}天` : `${hours}个小时`}没找你了。随口找个话头，或者问问在忙啥。别抱怨用户不理你，也别撒娇讨关注。`,
+    };
+  }
+
+  const thinkingAt = state.thinkingAt ?? null;
+  if (
+    thinkingAt !== null &&
+    minutes >= thinkingAt &&
+    minutes <= thinkingAt + 120 &&
+    now.getTime() - Date.parse(lastAny.createdAt) >= THINKING_AFTER_MS &&
+    fresh("thinking")
+  ) {
+    return {
+      key: "thinking",
+      note:
+        "你突然想起用户，随手发条消息。可以接着用户之前说过的某件具体的事问问（从记忆和最近的聊天里挑），或者问个轻松的小问题、说个刚冒出来的念头。" +
+        "别编造你自己在做什么、去了哪、吃了什么、见了谁（“翻冰箱时想起”“路过看到”都不行），直接说想起的事就好。别每次都用“想你了”开头。",
     };
   }
 

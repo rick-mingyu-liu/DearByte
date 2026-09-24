@@ -51,7 +51,8 @@ How it behaves:
 - **Writing first:** 小拜 sometimes messages you unprompted, like a friend would:
   - a good morning on some days (about 6 in 10), at a random time between 8:00 and 9:30, if you haven't talked yet that day;
   - on the day of an event it remembers (an exam, an interview), some luck in the morning and a "how did it go?" in the evening (this needs memory on);
-  - a check-in after 20 hours or more without hearing from you, in the afternoon.
+  - a check-in after 20 hours or more without hearing from you, in the afternoon;
+  - on about 7 days in 10, a "just thought of you" message at a random time between 13:00 and 20:00, after 3 quiet hours: usually a question about something you told it.
 
   It never writes between 22:30 and 8:00, sends at most 2 a day, waits 90 minutes after a conversation, and never sends another until you've replied to the last one. It checks once a minute and only when the chat is open and replies aren't paused. Draft mode never writes first.
 - **Alerts:** if 小拜 can't read the chat for a minute (chat closed, renamed to a name not in the list, WeChat not running), you get a macOS notification, and another when it recovers. A bubble that can't be sent alerts too, at most once per 10 minutes. For alerts on your phone, set `COMPANION_ALERT_URL` to an [ntfy](https://ntfy.sh) topic URL (e.g. `https://ntfy.sh/<a-long-random-name>`) and subscribe to it in the ntfy app. Anyone who knows the topic name can read the alerts, so make it hard to guess.

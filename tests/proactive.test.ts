@@ -63,9 +63,10 @@ test("never at night, over the daily cap, right after a chat, or after an unansw
 test("a new day starts fresh but remembers the last nudge", () => {
   const old = state({ date: "2026-09-23", sent: ["morning"], lastAt: "x" });
   const next = dayState(old, "2026-09-24", () => 0.1);
-  expect(next).toEqual({ date: "2026-09-24", morningAt: 8 * 60 + 9, sent: [], lastAt: "x" });
+  expect(next).toEqual({ date: "2026-09-24", morningAt: 8 * 60 + 9, thinkingAt: 13 * 60 + 42, sent: [], lastAt: "x" });
   expect(dayState(next, "2026-09-24", () => 0.9)).toBe(next);
   expect(dayState(null, "2026-09-24", () => 0.9).morningAt).toBeNull();
+  expect(dayState(null, "2026-09-24", () => 0.9).thinkingAt).toBeNull();
 });
 
 test("initiate stores only 小拜's message, and history marks the user's silence", async () => {
@@ -105,4 +106,16 @@ test("the loop won't write first mid-reply, and answers messages that arrive mea
   await loop.settle();
   expect(sent).toEqual(["早", "回你"]);
   expect(loop.initiate("queued", async () => ["x"])).not.toBe(false);
+});
+
+test("thinks of the user some afternoons, after a few quiet hours", () => {
+  const s = state({ thinkingAt: 15 * 60 });
+  const morning = [msg("user", at("10:00")), msg("assistant", at("10:00"))];
+  expect(plan(at("14:59"), { state: s, history: morning })).toBeNull();
+  expect(plan(at("15:30"), { state: s, history: morning })?.key).toBe("thinking");
+  expect(plan(at("17:01"), { state: s, history: morning })).toBeNull(); // window passed
+  const recent = [msg("user", at("13:00")), msg("assistant", at("13:00"))];
+  expect(plan(at("15:30"), { state: s, history: recent })).toBeNull(); // only 2.5 quiet hours
+  expect(plan(at("15:30"), { state: state({ thinkingAt: 900, sent: ["thinking"] }), history: morning })).toBeNull();
+  expect(plan(at("15:30"), { state: state(), history: morning })).toBeNull(); // not today
 });
