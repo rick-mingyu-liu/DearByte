@@ -72,7 +72,36 @@ The WeChat connection uses macOS Accessibility to operate the desktop client. It
 
 This is an experimental demo route with a risk of account restrictions. Use a test account. See the [English user guide](docs/guide.en.md) for setup, draft mode, and pause/resume controls.
 
-First, [set the allowed contact](docs/guide.en.md#set-the-allowed-contact): open the target chat and run `npm run dearbyte -- --chat "Chat name" --draft`. Later, edit `data/contacts.json` to add aliases for that same person, then restart. Only one contact is currently supported.
+#### Set the contact allowlist
+
+In Mac WeChat, signed in as Xiaobai, open the one-to-one chat you want her to answer. Use the full name shown at the top of the chat, not the person's WeChat ID:
+
+```bash
+npm run dearbyte -- --chat "Alex Zhang" --draft
+```
+
+On first run, the runner checks the open chat's name and creates `data/contacts.json`. Draft mode generates replies without sending them. After checking the setup, quit and start automatic replies:
+
+```bash
+npm run dearbyte
+```
+
+If that same contact has different remarks or nicknames, edit `data/contacts.json` and add the possible display names to `names`:
+
+```json
+{
+  "contacts": [
+    {
+      "id": "me",
+      "names": ["张三", "Alex Zhang"]
+    }
+  ]
+}
+```
+
+Replace the example names with actual display names for **the same person**; leave `id` as `me`. Save and restart the runner. Once the file exists, `--chat` does not append or overwrite the allowlist: edit the file directly.
+
+**Only one contact is currently supported.** Do not list different people as aliases or add a second contact object; history and memory are not isolated per contact yet. This file is ignored by Git. See the [contact setup guide](docs/guide.en.md#set-the-allowed-contact) for more details.
 
 ## Data and privacy
 
