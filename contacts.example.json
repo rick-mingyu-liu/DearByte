@@ -1,0 +1,9 @@
+{
+  "contacts": [
+    {
+      "id": "me",
+      "names": ["张三", "Alex"],
+      "note": "Copy to data/contacts.json. names: every name WeChat may show at the top of this chat (remark, nickname, old names)."
+    }
+  ]
+}
