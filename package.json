@@ -8,7 +8,7 @@
   },
   "scripts": {
     "companion": "tsx src/cli.ts",
-    "bakeoff": "node tools/bakeoff.mjs",
+    "bakeoff": "tsx tools/bakeoff.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
