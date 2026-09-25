@@ -13,7 +13,8 @@ import { describeNow } from "../companion/time.ts";
 export const SUMMARY_BATCH = 10;
 /** At most this many per call; a long existing history catches up over several turns. */
 export const SUMMARY_MAX_FOLD = 100;
-export const SUMMARY_MAX_CHARS = 400;
+/** Without reasoning the model writes 380–500 characters; cutting at 400 lost the newest events at the end. */
+export const SUMMARY_MAX_CHARS = 600;
 
 export const SUMMARY_SETTING = "summary_text";
 /** Id of the last message folded into the summary. */
@@ -22,7 +23,7 @@ export const SUMMARY_UPTO_SETTING = "summary_upto";
 const SUMMARY_PROMPT = `你在帮一个聊天伙伴整理“之前聊过什么”的备忘。给你旧的备忘和一段更早的聊天记录，写一份新的备忘。
 
 要求：
-- 用中文，${SUMMARY_MAX_CHARS} 字以内，按时间顺序，写成几句话，不要列表。
+- 用中文，400 字左右，最多 ${SUMMARY_MAX_CHARS} 字，按时间顺序，写成几句话，不要列表。
 - 记聊过的话题、发生的事、用户的心情变化、你们之间的梗；新的内容多写，很旧的可以压缩成一句。
 - 只写聊天里真的出现过的，不要推测，不要评价，不要给建议。
 - 用户说过要忘掉或别再提的事，不要写。
@@ -40,10 +41,14 @@ function line(m: StoredMessage, timeZone: string): string {
 
 export type SummaryOutcome = { folded: number; chars: number } | null;
 
+/** The model's output couldn't be used; the old summary is kept. */
+export class SummaryFailed extends Error {}
+
 /**
  * Folds messages that have left the last-`window` window into the summary,
  * once there are at least SUMMARY_BATCH of them. Returns null when there was
- * nothing to do or the output was unusable (the old summary is kept).
+ * nothing to do; throws SummaryFailed when the output was unusable (the old
+ * summary is kept).
  */
 export async function updateSummary(opts: { model: ChatModel; store: Store; window: number; timeZone: string }): Promise<SummaryOutcome> {
   const { store } = opts;
@@ -60,16 +65,19 @@ export async function updateSummary(opts: { model: ChatModel; store: Store; wind
       { role: "system", content: SUMMARY_PROMPT },
       { role: "user", content: `旧的备忘：${previous}\n\n更早的聊天记录：\n${aged.map((m) => line(m, opts.timeZone)).join("\n")}` },
     ],
-    // Generous: deepseek-flash reasons before answering, and 700 left the answer empty.
-    { json: true, temperature: 0, maxTokens: 2_000 },
+    // No reasoning: with it, deepseek-flash drafted, counted characters and
+    // redrafted for 4,000–6,000 tokens, so at 2,000 every fold came back empty
+    // and was retried each turn. Without it: about 2 s and 300 tokens.
+    { json: true, temperature: 0, maxTokens: 2_000, thinking: false },
   );
   let summary: string;
   try {
     const parsed = SummarySchema.safeParse(JSON.parse(completion.text));
-    if (!parsed.success || !parsed.data.summary) return null;
+    if (!parsed.success || !parsed.data.summary) throw new Error("no summary");
     summary = [...parsed.data.summary].slice(0, SUMMARY_MAX_CHARS).join("");
   } catch {
-    return null;
+    // Thrown, not null: "nothing to do" and "the model failed" must look different.
+    throw new SummaryFailed(`摘要没写成（模型输出 ${completion.usage.completionTokens} token，内容${completion.text ? "不能用" : "是空的"}）`);
   }
   // Written together, and only if nobody cleared the summary meanwhile
   // (/history clear, /memory forget): this fold was built on the old one.
