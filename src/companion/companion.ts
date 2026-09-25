@@ -16,6 +16,8 @@ export const CRISIS_AT_SETTING = "crisis_at";
 /** The crisis check gets this long in total; a slow check counts as no risk. */
 const CRISIS_CHECK_WAIT_MS = 8_000;
 
+const speakerKey = (value: string) => value.normalize("NFKC").toLocaleLowerCase().replace(/[\s\p{P}]+/gu, "");
+
 /** Bubbles per reply outside a crisis. */
 export const CHAT_MAX_BUBBLES = 2;
 
@@ -61,29 +63,31 @@ export class Companion {
 
   /** The last summary fold; the next one waits for it. */
   private summaries: Promise<unknown> = Promise.resolve();
+  /** Serialize background fact extraction so a group burst doesn't flood the model with memory calls. */
+  private factExtractions: Promise<unknown> = Promise.resolve();
 
   private emit(event: CompanionEvent) {
     this.deps.onEvent?.(event);
   }
 
-  private async call(messages: ChatMessage[], purpose: "reply" | "repair" | "memory"): Promise<Completion> {
-    const completion = await this.deps.model.complete(messages, { json: true });
+  private async call(messages: ChatMessage[], purpose: "reply" | "repair" | "memory", signal?: AbortSignal): Promise<Completion> {
+    const completion = await this.deps.model.complete(messages, { json: true, signal });
     this.emit({ type: "model", purpose, ms: completion.ms, ...completion.usage, cost: this.deps.model.cost(completion.usage) });
     return completion;
   }
 
   /** One reply, and the memory and summary work it sets off, within one spending cap. */
-  handle(input: { text: string; image?: ImageInput }): Promise<TurnResult> {
+  handle(input: { text: string; image?: ImageInput; speaker?: string; suppressReply?: boolean; signal?: AbortSignal }): Promise<TurnResult> {
     return withTurnBudget(() => this.reply(input));
   }
 
-  private async reply(input: { text: string; image?: ImageInput }): Promise<TurnResult> {
+  private async reply(input: { text: string; image?: ImageInput; speaker?: string; suppressReply?: boolean; signal?: AbortSignal }): Promise<TurnResult> {
     const { store, model, parts, timeZone } = this.deps;
     // The stored message keeps the user's words and the image flag; only the prompt gets the note.
     const seen =
       input.image && !model.vision
         ? { text: [input.text, "（用户发了一张图，但你现在用的模型看不了图，跟用户说一声）"].filter(Boolean).join("\n") }
-        : input;
+        : { text: input.text, image: input.image };
 
     const now = this.deps.now?.() ?? new Date();
     const history = store.recentMessages(this.deps.historyMessages);
@@ -97,19 +101,24 @@ export class Companion {
 
     // The model check runs alongside the reply; it only costs time when it fires.
     const check =
-      !crisis && this.deps.crisisCheck && input.text.trim()
-        ? this.crisisCheck(input.text, [...history].reverse().find((m) => m.role === "user")?.text)
+      !input.suppressReply && !crisis && this.deps.crisisCheck && input.text.trim()
+        ? this.crisisCheck(input.text, [...history].reverse().find((m) => m.role === "user")?.text, input.signal)
         : null;
 
     const summary = memoryEnabled ? store.getSetting(SUMMARY_SETTING) : null;
     const energy = userEnergy({ text: input.text, image: Boolean(input.image) });
     const prompt = (crisis: boolean) =>
       buildMessages(buildSystemPrompt(parts, { now, timeZone, memoryEnabled, facts, crisis, recent: recentPhrases(history), summary, energy, emojiRecently: emojiRecently(history) }), history, seen);
-    let reply = await this.generate(prompt(crisis));
-    if (check && (await check)) {
+    let reply = input.suppressReply ? { bubbles: [] } : await this.generate(prompt(crisis), input.signal);
+    if (!input.suppressReply && check && (await check)) {
       crisis = true;
       this.emit({ type: "crisis_detected", by: "model" });
-      reply = await this.generate(prompt(true));
+      reply = await this.generate(prompt(true), input.signal);
+    }
+    // A sender label is routing metadata, never a standalone message to send.
+    if (input.speaker) {
+      const key = speakerKey(input.speaker);
+      reply = { ...reply, bubbles: reply.bubbles.filter((bubble) => speakerKey(bubble) !== key) };
     }
     if (crisis) store.setSetting(CRISIS_AT_SETTING, now.toISOString());
     // A third bubble reads as an AI over-explaining. Crisis replies keep all of
@@ -137,8 +146,12 @@ export class Companion {
         return completion;
       },
     };
-    const memory = memoryEnabled
-      ? extractFacts({ model: trackedModel, store, userMessage, previousAssistant, timeZone })
+    const extraction = memoryEnabled
+      ? this.factExtractions.then(() => extractFacts({ model: trackedModel, store, userMessage, previousAssistant, timeZone }))
+      : null;
+    if (extraction) this.factExtractions = extraction.catch(() => null);
+    const memory = extraction
+      ? extraction
           .then((outcome) => {
             this.emit({ type: "memory", outcome });
             return outcome;
@@ -197,7 +210,7 @@ export class Companion {
   }
 
   /** The model's view, given at most CRISIS_CHECK_WAIT_MS from the start of the turn; errors count as no. */
-  private crisisCheck(text: string, previous?: string): Promise<boolean> {
+  private crisisCheck(text: string, previous?: string, parentSignal?: AbortSignal): Promise<boolean> {
     const { model } = this.deps;
     const logged: ChatModel = {
       name: model.name,
@@ -212,14 +225,20 @@ export class Companion {
     // Past the budget the answer counts as no, and the request is cancelled so it can't hold up shutdown.
     const abort = new AbortController();
     const timer = setTimeout(() => abort.abort(), CRISIS_CHECK_WAIT_MS);
+    const abortFromParent = () => abort.abort(parentSignal?.reason);
+    if (parentSignal?.aborted) abortFromParent();
+    else parentSignal?.addEventListener("abort", abortFromParent, { once: true });
     return modelSeesCrisis(logged, text, previous, abort.signal)
       .catch(() => false)
-      .finally(() => clearTimeout(timer));
+      .finally(() => {
+        clearTimeout(timer);
+        parentSignal?.removeEventListener("abort", abortFromParent);
+      });
   }
 
   /** One call, one repair attempt, then salvage or a fixed fallback. */
-  private async generate(messages: ChatMessage[]): Promise<Reply> {
-    const first = await this.call(messages, "reply");
+  private async generate(messages: ChatMessage[], signal?: AbortSignal): Promise<Reply> {
+    const first = await this.call(messages, "reply", signal);
     const parsed = parseReply(first.text);
     if (parsed.ok) return parsed.reply;
 
@@ -230,10 +249,11 @@ export class Companion {
         { role: "assistant", content: first.text },
         {
           role: "user",
-          content: `（系统提示，不是用户说的）上一条回复格式不对：${parsed.problems.join("；")}。请保持同样的意思重写：只输出 {"bubbles": [...]}，1–4 条，每条不超过 120 字。`,
+          content: `（系统提示，不是用户说的）上一条回复格式不对：${parsed.problems.join("；")}。请保持同样的意思重写：只输出 {"bubbles": [...]}，通常 1–2 条，每条不超过 120 字；只有纯粹报名字且无需回复时可输出空数组。`,
         },
       ],
       "repair",
+      signal,
     );
     const repaired = parseReply(repair.text);
     if (repaired.ok) return repaired.reply;

@@ -9,6 +9,8 @@ import { z } from "zod";
 const ContactSchema = z.object({
   /** Stable id; names can change. Reserved for per-contact history later. */
   id: z.string().regex(/^[a-z0-9_-]{1,32}$/),
+  /** Direct messages remain the default; group chats must be explicitly allowed. */
+  type: z.enum(["direct", "group"]).optional(),
   /** Every name WeChat may show for this chat: the remark, the nickname, old names. */
   names: z.array(z.string().trim().min(1)).min(1),
   note: z.string().optional(),
@@ -17,6 +19,17 @@ const ContactSchema = z.object({
 const FileSchema = z.object({ contacts: z.array(ContactSchema).min(1) });
 
 export type Contact = z.infer<typeof ContactSchema>;
+
+/** Normalize WeChat's title variants; group titles may add a trailing member count. */
+export function contactNameKey(value: string, groupChat = false): string {
+  const normalized = value.normalize("NFKC");
+  const withoutMemberCount = groupChat ? normalized.replace(/\s*\(\s*\d+\s*\)\s*$/u, "") : normalized;
+  return withoutMemberCount.toLocaleLowerCase().replace(/[\s\p{P}]+/gu, "");
+}
+
+export function contactNamesMatch(left: string, right: string, groupChat = false): boolean {
+  return contactNameKey(left, groupChat) === contactNameKey(right, groupChat);
+}
 
 export function loadContacts(path: string): Contact[] | null {
   if (!existsSync(path)) return null;

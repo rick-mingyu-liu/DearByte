@@ -44,15 +44,17 @@ Here is what happens when you send 「今天好累」 ("so tired today") at 21:0
 | # | Layer | What happens | Time |
 |---|---|---|---|
 | 1 | **WeChat** | Your phone sends it to Tencent. WeChat on 小拜's Mac shows a new row, `AlexSaid:今天好累`, using your WeChat nickname. | under 1 s |
-| 2 | **Helper** (`main.swift`) | Once a second the runner asks "what's in the chat?". The helper reads the chat title and every row title through Accessibility, and returns `{chat, rows}`. | ~50 ms |
-| 3 | **Channel** (`channel.ts`) | Checks the open chat is one of your names in `contacts.json`, or it replies to nobody. Lines the new snapshot up with the last one; the extra row at the bottom is new. Parses it as text from you. If a second person ever speaks, it's a group chat, so it pauses. | instant |
-| 4 | **Reply loop** (`reply-loop.ts`) | Waits 1 s for more messages, so 「今天好累」「不想动」 become one turn. If 小拜 is already answering, the new message waits its turn. | 1 s |
-| 5 | **Companion** (`companion.ts`) | Saves your message. Checks for crisis keywords, and starts the model crisis check at the same time as the reply. Loads your facts, style rules and the summary. Builds the prompt and asks the model for `{"bubbles": [...]}`. Repairs bad output, cuts to 2 bubbles, saves the reply. | ~1.2 s |
-| 6 | **Reply loop** again | Holds the first bubble for a reading pause that grows with your message: about 0.6 s for 「在吗」, at most 3 s. The model's time counts toward it. Then it sends each bubble, pausing about 150 ms per character between them, as if typing. | 2–5 s |
-| 7 | **Helper** again | Checks the right chat is open and the box is empty, fills in the bubble, presses Return, and waits for a `MeSaid:` row to confirm. A bubble it can't confirm is never resent. | ~0.5 s per bubble |
+| 2 | **Helper** (`main.swift`) | About twice a second the runner asks "what's in the chat?". The helper reads up to the newest 60 rows and the chat title through Accessibility, returning the row offset too. If the Accessibility tree is unavailable, it can use local OCR on the visible WeChat window. | ~50 ms |
+| 3 | **Channel** (`channel.ts`) | Checks the open chat against `contacts.json`, aligns the row snapshot with the last one and parses new messages. A direct chat pauses if a second sender appears; a chat explicitly marked as a group accepts multiple speakers. | instant |
+| 4 | **Reply loop** (`reply-loop.ts`) | Waits 1 s to combine a direct-chat burst. Group messages are handled separately, with up to four replies in flight so a slow model call does not block other speakers. A reply request is cancelled after 18 s and replaced by a short fallback. | 0–1 s |
+| 5 | **Companion** (`companion.ts`) | Saves the incoming message, checks for crisis keywords and starts the model crisis check alongside the reply. Loads facts, style rules and the summary, then asks the model for `{"bubbles": [...]}`. Repairs bad output and limits ordinary replies to two bubbles. Assistant text enters history only after sending succeeds; name-only group messages can be saved without requesting a reply. | ~1.2 s |
+| 6 | **Reply loop** again | Direct chats get a reading pause that grows with the message: about 0.6 s for 「在吗」 and up to 3 s for a long message or photo. Model time counts toward it. Group chats have no added pause. Later bubbles wait about 50 ms per character in direct chats; group bubbles have no typing pause. | 1–4 s |
+| 7 | **Helper** again | Verifies the bound chat and exact text, replaces any old composer draft, brings WeChat forward and presses Return. If a bubble is uncertain, it skips it and still attempts later bubbles; it never blindly resends the uncertain one. | ~0.5 s per bubble |
 | 8 | **Memory** (background) | A second, cheaper call looks for facts in 「今天好累」 (probably none). If 10 more messages have left the 40-message window, it folds them into the summary. You never wait for this. | ~1–2 s |
 
-End to end: **about 4–7 seconds** from your send to her first bubble, and about $0.0005.
+End to end: **about 2–5 seconds** from your send to her first bubble, depending mostly on model response time, and about $0.0005.
+
+If a model request stalls for 18 seconds, it is cancelled and the runner sends a short fallback reply before moving on to queued messages. A WeChat snapshot that stalls is restarted after 12 seconds after startup.
 
 Two other paths use the same layers:
 - **Writing first.** Once a minute the runner asks `planProactive` "should 小拜 write now?" (section 5). If yes, it enters at step 4. The prompt carries a note instead of your message, and nothing is saved until the bubbles are really sent.
@@ -71,7 +73,7 @@ Two other paths use the same layers:
 | `MeSaid:…` | something 小拜 sent |
 | `01:34` | a time label |
 
-Every second, the runner takes a snapshot and compares it with the previous one. Only the new rows count as new messages. The comparison is tolerant:
+Twice a second, the runner takes a snapshot and compares it with the previous one. It checks the chat against the configured name, then processes only new rows. WeChat 4.x reports the rows' absolute offset to avoid guessing when older rows scroll out of the recent window. The comparison is tolerant:
 - rows dropping off the top of the table
 - a row changing while it loads
 - a blank read
@@ -80,14 +82,14 @@ These all happen in practice, and each once caused a bug that is now covered by 
 
 **Sending.** The helper finds the message box (a text area titled with the chat's name) and checks:
 - the open chat is the right one
-- the box is empty, so it never types over someone's draft
+- the open chat is the bound one; automatic sending replaces any text already in the box with the generated reply
 - Return would go to that box
 
-Then it fills in the text, presses Return, and confirms that a new `MeSaid:<text>` row appeared. A bubble it can't confirm is reported, never resent, so nothing goes out twice. This works while WeChat sits in the background on another desktop.
+Then it fills in the text, brings WeChat to the front if needed, presses ordinary Return in the verified composer, and confirms that the composer cleared. If the exact reply is still in the composer, it can press Return once more; otherwise it reports the result without blindly sending again. The channel records only confirmed bubbles in assistant history and continues to later bubbles after a send failure.
 
 **Photos.** WeChat 3.8.4 saves received photos as ordinary JPEGs in a folder for each chat. When a photo row appears, the runner picks the newest new file in that one folder. A photo sent twice is a hard link to the old file with an old date, which is why the check uses the later of the two file timestamps.
 
-**Who 小拜 talks to.** `data/contacts.json` (gitignored) lists the chat, with every name it might show. So when a remark changes, as 「张三」 → 「Alex」 might, replies keep going. Only one contact is supported today. Several would need separate memory per person and a way to switch chats.
+**Who 小拜 talks to.** `data/contacts.json` (gitignored) lists one allowed conversation, with every name it might show. Set `type` to `group` for a group. Group messages from multiple senders are allowed, and proactive messages stay off. Several conversations would need separate memory and a way to switch chats.
 
 **What can't be done in the background.** WeChat's downloaded sticker packs are encrypted, and the sticker panel only works with a real click while WeChat is in front. So 小拜 uses WeChat's text emoji codes (`[捂脸]` `[旺柴]`), which arrive as pictures on the phone. Stickers are planned for a Mac dedicated to 小拜.
 
@@ -97,12 +99,12 @@ Then it fills in the text, presses Return, and confirms that a new `MeSaid:<text
 
 ## 2. How a reply is made
 
-1. **Collect.** Several quick messages (within about 1 s) become one turn, like a person reading a burst before answering. A photo in the burst is attached.
+1. **Collect.** Several quick direct-chat messages (within about 1 s) become one turn, like a person reading a burst before answering. Group messages each start their own turn, with at most four concurrent turns. A photo in a direct-chat burst is attached.
 2. **Build the prompt** (section 3) from the persona, examples, time, memory, recent chat and your new message. Your message also gets an energy score (`src/companion/energy.ts`). A short, flat one (「嗯」「在干嘛」) tells 小拜 to answer in 1 bubble. A medium one gets 1 unless she has two different things to say. A long, excited one, or a photo, leaves it to her. Before this, almost every reply was 2 bubbles. Now it's 1.4 on average.
 3. **Call the model** in JSON mode: `{"bubbles": ["…", "…"]}`. Each string is one WeChat bubble.
 4. **Check the output.** If it isn't valid JSON or breaks the limits, there is one repair attempt; then salvage what's usable; then a fixed fallback. More than 2 bubbles are cut to 2, because a third bubble always read as AI over-explaining. Crisis replies are the exception.
 5. **Safety check in parallel.** A small classifier call runs alongside the reply (section 6).
-6. **Send like a person.** The first bubble waits as if reading it: about 0.6 s for 「在吗」, longer for a long message or a photo, at most 3 s (±25%); the model's time counts toward it. Each later bubble waits about as long as typing it takes (~150 ms per character, ±25% jitter).
+6. **Send like a person.** Direct chats use a reading pause that grows with the message: about 0.6 s for 「在吗」 and up to 3 s for a long message or photo, counting model time. Group replies skip the pause. Later direct-chat bubbles wait about 50 ms per character (capped at 1.6 s, ±25% jitter); group replies skip this wait.
 7. **Remember.** After the reply, in the background, facts are pulled from your message and old chat is folded into the summary (section 4).
 
 **Cost.** About $0.0005–0.001 per message in total (reply, memory, safety check), so roughly a cent for a long evening of chat.

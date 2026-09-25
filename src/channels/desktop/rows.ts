@@ -4,14 +4,13 @@
 //   "Alex:Sent aPhoto"          incoming photo
 //   "MeSaid:hi"                 sent by this account (小拜)
 //   "00:03", "Yesterday 23:51"  time labels
-// The sender is the contact's own nickname ("Alex"), not the chat title, which
-// can be a remark ("张三"). The bound chat is one-to-one, so anyone who isn't
-// "Me" is the user; a group chat would need the sender kept.
+// The sender is the speaker's nickname ("Alex"), not the chat title, which
+// can be a remark ("张三"). Group replies preserve this sender in the prompt.
 //
-// WeChat 4.x (observed on 4.1.13) no longer says who sent a row. The helper
-// passes message rows as "Bubble:<text>", time labels as they are, and rows
-// scrolled out of view as "". The channel tells 小拜's own bubbles apart by
-// matching them with what it just sent.
+// WeChat 4.x (observed on 4.1.13) no longer says who sent an Accessibility
+// row. For configured group chats the helper uses OCR to associate the visible
+// nickname above a left-side bubble, encoded with a unit separator. If OCR
+// can't read a nickname, the channel labels that speaker as unknown.
 
 export type Row =
   | { kind: "text"; sender: string; text: string }
@@ -19,8 +18,10 @@ export type Row =
   /** Something else from the user: sticker, voice, file, … (label as WeChat shows it). */
   | { kind: "other"; sender: string; label: string }
   | { kind: "mine" }
-  /** WeChat 4.x: a message from either side; the channel works out which. */
-  | { kind: "bubble"; text: string }
+  /** WeChat 4.x visual fallback: a right-aligned message sent by this account. */
+  | { kind: "mineBubble"; text: string }
+  /** WeChat 4.x visual row; sender is included when OCR found the group nickname. */
+  | { kind: "bubble"; sender?: string; text: string }
   /** Time labels and blank rows. */
   | { kind: "meta" }
   /** Anything we don't recognise, e.g. WeChat switched to the Chinese UI. */
@@ -29,7 +30,14 @@ export type Row =
 const TIME_LABEL = /^(\d{1,2}:\d{2}|(Yesterday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday) \d{1,2}:\d{2}|\d{4}\/\d{1,2}\/\d{1,2} \d{1,2}:\d{2})$/;
 
 export function parseRow(title: string): Row {
-  if (title.startsWith("Bubble:")) return { kind: "bubble", text: title.slice("Bubble:".length) };
+  if (title.startsWith("MeBubble:")) return { kind: "mineBubble", text: title.slice("MeBubble:".length) };
+  if (title.startsWith("Bubble:")) {
+    const content = title.slice("Bubble:".length);
+    const separator = content.indexOf("\x1f");
+    return separator < 0
+      ? { kind: "bubble", text: content }
+      : { kind: "bubble", sender: content.slice(0, separator), text: content.slice(separator + 1) };
+  }
   if (title.startsWith("MeSaid:") || title.startsWith("Me:")) return { kind: "mine" };
   const said = /^(.+?)Said:([\s\S]*)$/.exec(title);
   if (said) return { kind: "text", sender: said[1], text: said[2] };
@@ -45,6 +53,18 @@ export function parseRow(title: string): Row {
 
 /** How far down the table rows may have scrolled off the top between two polls. */
 const MAX_DROPPED = 50;
+
+/** Stable identity for comparing WeChat's AX and OCR versions of a row. */
+function rowKey(title: string): string {
+  const row = parseRow(title);
+  if (row.kind === "bubble" || row.kind === "mineBubble") return `bubble:${bubbleKey(row.text)}`;
+  if (row.kind === "text") return `text:${row.sender}:${row.text}`;
+  if (row.kind === "photo") return `photo:${row.sender}`;
+  if (row.kind === "other") return `other:${row.sender}:${row.label}`;
+  return title;
+}
+
+const sameRow = (a: string, b: string) => rowKey(a) === rowKey(b);
 
 /**
  * How the new snapshot lines up with the previous one: the number of rows
@@ -66,7 +86,7 @@ export function alignRows(previous: string[], next: string[], known?: number): n
   for (let dropped = 0; dropped < Math.min(previous.length, MAX_DROPPED + 1); dropped++) {
     const overlap = Math.min(previous.length - dropped, next.length);
     let score = 0;
-    for (let i = 0; i < overlap; i++) if (previous[dropped + i] === next[i]) score++;
+    for (let i = 0; i < overlap; i++) if (sameRow(previous[dropped + i], next[i])) score++;
     if (score > best.score && score * 2 >= overlap) best = { dropped, score };
   }
   return best.dropped < 0 ? null : best.dropped;
@@ -110,8 +130,30 @@ export function newRows(
   const overlap = Math.min(previous.length - dropped, next.length);
   const changed = next
     .slice(0, overlap)
-    .filter((row, i) => row !== previous[dropped + i] && wasPending(previous[dropped + i], next.length - 1 - i));
+    .filter((row, i) => !sameRow(row, previous[dropped + i]) && wasPending(previous[dropped + i], next.length - 1 - i));
   return [...changed, ...next.slice(overlap)];
+}
+
+/**
+ * When a refresh changes the row layout, take only rows after the newest
+ * contiguous run shared with the prior snapshot. If the chat was scrolled up,
+ * that run is normally at the new snapshot's end, so no old messages replay.
+ */
+export function rowsAfterLatestAnchor(previous: string[], next: string[]): string[] | null {
+  let best = { length: 0, end: -1 };
+  for (let end = 0; end < next.length; end++) {
+    for (let oldEnd = 0; oldEnd < previous.length; oldEnd++) {
+      if (!sameRow(previous[oldEnd], next[end])) continue;
+      let length = 1;
+      while (
+        oldEnd - length >= 0 &&
+        end - length >= 0 &&
+        sameRow(previous[oldEnd - length], next[end - length])
+      ) length++;
+      if (length > best.length || (length === best.length && end > best.end)) best = { length, end };
+    }
+  }
+  return best.length ? next.slice(best.end + 1) : null;
 }
 
 /**

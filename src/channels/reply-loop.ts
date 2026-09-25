@@ -9,8 +9,10 @@ import { imageFromBytes } from "../media/images.ts";
 
 /** How long to wait for follow-up messages before answering a burst. */
 const BURST_WINDOW_MS = 1_000;
+/** Abort a model reply before a stalled request can hold the message queue for 30 s. */
+const REPLY_TIMEOUT_MS = 18_000;
 
-export type Incoming<Ref> = { text: string; image: Ref | null };
+export type Incoming<Ref> = { text: string; image: Ref | null; speaker?: string; suppressReply?: boolean };
 
 export type ReplyEvent =
   | { type: "inbound"; text: string; image: boolean; merged: number }
@@ -49,11 +51,11 @@ export function mergeIncoming<M extends Incoming<unknown>>(batch: M[]): M {
 }
 
 /**
- * Pause before a bubble, as if typing it: about 150 ms per character, capped,
+ * Pause before a bubble, as if typing it: about 50 ms per character, capped,
  * with ±25% jitter so the rhythm isn't mechanical. `random` is in [0, 1).
  */
 export const bubbleDelay = (bubble: string, random = 0.5) =>
-  Math.round(Math.min(4_000, 600 + 150 * [...bubble].length) * (0.75 + random / 2));
+  Math.round(Math.min(1_600, 250 + 50 * [...bubble].length) * (0.75 + random / 2));
 
 /**
  * The shortest time between a message arriving and the first bubble, as if
@@ -67,6 +69,8 @@ export const readDelay = (text: string, image: boolean, random = 0.5) =>
 export class ReplyLoop<M extends Incoming<unknown>> {
   private queue: M[] = [];
   private busy = false;
+  /** Group messages can progress independently so one slow model call can't block other speakers. */
+  private readonly independentTurns = new Set<Promise<void>>();
   /** In-flight turns and background memory work; each removes itself when done. */
   private readonly pending = new Set<Promise<unknown>>();
 
@@ -77,6 +81,14 @@ export class ReplyLoop<M extends Incoming<unknown>> {
       onEvent?: (event: ReplyEvent) => void;
       sleep?: (ms: number) => Promise<void>;
       burstWindowMs?: number;
+      /** Handle each incoming message in its own turn instead of merging a burst. */
+      parallelIncoming?: boolean;
+      /** Bound concurrent turns while letting later turns pass a slow one. */
+      maxConcurrentIncoming?: number;
+      /** Override the human-style wait before the first reply bubble. */
+      readDelayMs?: number;
+      /** Whether to add human-style waits between reply bubbles. */
+      bubbleDelays?: boolean;
       random?: () => number;
       now?: () => number;
     },
@@ -116,11 +128,44 @@ export class ReplyLoop<M extends Incoming<unknown>> {
       while (this.queue.length) {
         await this.sleep(this.deps.burstWindowMs ?? BURST_WINDOW_MS);
         const batch = this.queue.splice(0);
-        await this.answer(this.deps.outlet.merge(batch), batch.length);
+        if (this.deps.parallelIncoming) {
+          const limit = Math.max(1, this.deps.maxConcurrentIncoming ?? 4);
+          for (const message of batch) {
+            while (this.independentTurns.size >= limit) {
+              await Promise.race(this.independentTurns);
+            }
+            this.startIndependentTurn(message);
+          }
+          continue;
+        }
+        const message = this.deps.outlet.merge(batch);
+        try {
+          await this.answer(message, batch.length);
+        } catch (err) {
+          this.emit({ type: "error", message: `处理消息时出错，发送兜底回复：${(err as Error).message}` });
+          await this.sendAll(message, FALLBACK_REPLY.bubbles);
+        }
       }
     } finally {
       this.busy = false;
+      // An unexpected turn error must not strand messages that arrived meanwhile.
+      if (this.queue.length) this.track(this.drain());
     }
+  }
+
+  private startIndependentTurn(message: M): void {
+    let work!: Promise<void>;
+    work = this.answer(message, 1)
+      .catch(async (err) => {
+        this.emit({ type: "error", message: `处理消息时出错，发送兜底回复：${(err as Error).message}` });
+        await this.sendAll(message, FALLBACK_REPLY.bubbles);
+      })
+      .finally(() => {
+        this.independentTurns.delete(work);
+        if (this.queue.length && !this.busy) this.track(this.drain());
+      });
+    this.independentTurns.add(work);
+    this.track(work);
   }
 
   /**
@@ -129,7 +174,7 @@ export class ReplyLoop<M extends Incoming<unknown>> {
    * isn't sent: answering them comes first. Only sent bubbles are committed.
    */
   initiate(reason: string, generate: () => Promise<Initiative>, shouldStop: () => boolean = () => false): Promise<InitiateResult> {
-    if (this.busy || this.queue.length) return Promise.resolve("busy");
+    if (this.busy || this.queue.length || this.independentTurns.size) return Promise.resolve("busy");
     this.busy = true;
     const interrupted = () => this.queue.length > 0 || shouldStop();
     const work = (async (): Promise<InitiateResult> => {
@@ -172,18 +217,35 @@ export class ReplyLoop<M extends Incoming<unknown>> {
 
     let bubbles: string[];
     let commit: (sent: string[]) => unknown = () => {};
+    const abort = new AbortController();
+    const timeout = setTimeout(() => abort.abort(new Error("reply_timeout")), REPLY_TIMEOUT_MS);
     try {
-      const turn = await companion.handle({ text, image });
+      const turn = await companion.handle({
+        text,
+        image,
+        speaker: message.speaker,
+        suppressReply: message.suppressReply,
+        signal: abort.signal,
+      });
       this.emit({ type: "turn", turn });
       this.track(turn.memory);
       bubbles = turn.reply.bubbles;
       commit = turn.commit;
     } catch (err) {
-      this.emit({ type: "error", message: `生成回复失败，发送兜底回复：${(err as Error).message}` });
+      const message = abort.signal.aborted
+        ? `模型超过 ${REPLY_TIMEOUT_MS / 1_000} 秒没有完成回复，先发兜底回复`
+        : `生成回复失败，发送兜底回复：${(err as Error).message}`;
+      this.emit({ type: "error", message });
       bubbles = FALLBACK_REPLY.bubbles;
+    } finally {
+      clearTimeout(timeout);
     }
 
-    const wait = readDelay(message.text, message.image !== null, this.random()) - ((this.deps.now ?? Date.now)() - started);
+    // A silent turn (for example, a name-only introduction that was saved to
+    // memory) should not wait through the human-style typing delay.
+    if (!bubbles.length) return;
+
+    const wait = (this.deps.readDelayMs ?? readDelay(message.text, message.image !== null, this.random())) - ((this.deps.now ?? Date.now)() - started);
     if (wait > 0) await this.sleep(wait);
     // Only what reached the chat is remembered as said.
     const sent = await this.sendAll(message, bubbles);
@@ -196,19 +258,20 @@ export class ReplyLoop<M extends Incoming<unknown>> {
 
   /**
    * Sends bubbles in order, pausing before each after the first as if typing it.
-   * Stops at a failure, or before a bubble once `stop` is true. Returns what was sent.
+   * A failed bubble is skipped; later bubbles are still attempted. `stop` still
+   * lets an incoming message interrupt a proactive reply.
    */
   private async sendAll(message: M | null, bubbles: string[], stop?: () => boolean): Promise<string[]> {
     const sent: string[] = [];
     for (const [i, bubble] of bubbles.entries()) {
-      if (i > 0) {
+      if (i > 0 && this.deps.bubbleDelays !== false) {
         await this.sleep(bubbleDelay(bubble, this.random()));
         if (stop?.()) break;
       }
       const result = await this.deps.outlet.sendBubble(message, bubble).catch(() => "failed" as const);
       if (result === "failed") {
-        this.emit({ type: "error", message: `第 ${i + 1} 条气泡发送失败，后面的不再发（聊天记录里只保存已发出的部分）` });
-        break;
+        this.emit({ type: "error", message: `第 ${i + 1} 条气泡发送未确认，已跳过它，继续尝试发送后面的内容` });
+        continue;
       }
       this.emit({ type: result, bubble });
       sent.push(bubble);

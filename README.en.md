@@ -69,13 +69,13 @@ Without a key, run `npm run companion -- --fake` to check the local flow. This m
 
 ### Chat in WeChat
 
-The WeChat connection uses macOS Accessibility to operate the desktop client. It currently targets **WeChat for Mac 4.x (or 3.8.4), with the English UI and a single one-to-one chat**. On 4.x, photos need the Screen Recording permission. Accessibility permission and Swift are required; photos need a separate folder setting.
+The WeChat connection uses macOS Accessibility to operate the desktop client. It currently targets **WeChat for Mac 4.x (or 3.8.4), with the English UI and one allowed conversation, either a direct chat or a group**. Set `type` to `group` in `data/contacts.json` to allow a group; group chats do not send proactive messages. Some 4.1.x builds hide their chat controls from Accessibility; DearByte then uses local screen OCR for visible text. This text fallback needs the WeChat window visible on the current desktop and Screen Recording permission. Automatic replies replace any text already in the composer before sending. Photo recognition still needs usable Accessibility controls. Accessibility permission and Swift are required; photos need a separate folder setting.
 
 This is an experimental demo route with a risk of account restrictions. Use a test account. See the [English user guide](docs/guide.en.md) for setup, draft mode, and pause/resume controls.
 
 #### Set the contact allowlist
 
-In Mac WeChat, signed in as Xiaobai, open the one-to-one chat you want her to answer. Use the full name shown at the top of the chat, not the person's WeChat ID:
+In Mac WeChat, signed in as Xiaobai, open the conversation you want her to answer. Use the full name shown at the top of the chat, not a person's WeChat ID:
 
 ```bash
 npm run dearbyte -- --chat "Alex Zhang" --draft
@@ -102,7 +102,7 @@ If that same contact has different remarks or nicknames, edit `data/contacts.jso
 
 Replace the example names with actual display names for **the same person**; leave `id` as `me`. Save and restart the runner. Once the file exists, `--chat` does not append or overwrite the allowlist: edit the file directly.
 
-**Only one contact is currently supported.** Do not list different people as aliases or add a second contact object; history and memory are not isolated per contact yet. This file is ignored by Git. See the [contact setup guide](docs/guide.en.md#set-the-allowed-contact) for more details.
+**Only one conversation is currently supported.** It can be a direct chat or a group marked with `"type": "group"`. Do not add a second contact object; history and memory are not isolated per conversation yet. This file is ignored by Git. See the [contact setup guide](docs/guide.en.md#set-the-allowed-contact) for more details.
 
 ## Data and privacy
 
@@ -115,7 +115,7 @@ Replace the example names with actual display names for **the same person**; lea
 
 Terminal chat, controllable memory, image input, proactive messages and the experimental WeChat connection are implemented. WeChat text and photo flows were tested on a real device on **2026-09-24**.
 
-WeChat mode currently supports one contact. Voice messages, videos, files and stickers cannot be understood directly. Xiaobai is an AI, not a person; crisis-signal detection adjusts replies but cannot replace professional help or contact emergency services.
+WeChat mode currently supports one direct chat or one explicitly allowed group. Voice messages, videos, files and stickers cannot be understood directly. Xiaobai is an AI, not a person; crisis-signal detection adjusts replies but cannot replace professional help or contact emergency services.
 
 ## Contributing
 

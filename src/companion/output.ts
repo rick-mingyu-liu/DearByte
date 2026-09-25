@@ -14,7 +14,6 @@ export const ReplySchema = z.object({
         .min(1, "empty bubble")
         .refine((s) => codePoints(s) <= MAX_BUBBLE_CHARS, `bubble over ${MAX_BUBBLE_CHARS} chars`),
     )
-    .min(1, "no bubbles")
     .max(MAX_BUBBLES, `more than ${MAX_BUBBLES} bubbles`),
 });
 

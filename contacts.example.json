@@ -2,8 +2,9 @@
   "contacts": [
     {
       "id": "me",
+      "type": "direct",
       "names": ["张三", "Alex"],
-      "note": "Copy to data/contacts.json. names: every name WeChat may show at the top of this chat (remark, nickname, old names)."
+      "note": "Copy to data/contacts.json. Set type to group for an explicitly allowed group chat. names: every name WeChat may show at the top of this chat."
     }
   ]
 }

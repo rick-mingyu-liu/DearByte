@@ -23,7 +23,7 @@ import { systemNotifier, Watchdog } from "./alerts.ts";
 import { filmChannelLine, filmCompanionLine } from "./film.ts";
 import { loadConfig, ROOT } from "./config.ts";
 import { applyRetention } from "./memory/summary.ts";
-import { loadContacts, saveContacts } from "./contacts.ts";
+import { contactNamesMatch, loadContacts, saveContacts, type Contact } from "./contacts.ts";
 import { COMMON_HELP, describeEvent, describeModel, describeReplyEvent, log, runSharedCommand } from "./console.ts";
 import { FakeModel } from "./model/fake.ts";
 import { createModel, type ModelSettings } from "./model/providers.ts";
@@ -88,27 +88,36 @@ async function main() {
     store.close();
     process.exit(1);
   };
-  let contacts;
+  let contacts: Contact[] | null = null;
   try {
     contacts = loadContacts(contactsPath);
   } catch (err) {
     fail((err as Error).message);
   }
   const requested = argValue(argv, "--chat");
-  if (contacts && requested && !contacts.some((c) => c.names.includes(requested))) {
+  if (contacts && requested && !contacts.some((c) => c.names.some((name) => contactNamesMatch(name, requested, c.type === "group")))) {
     fail(`data/contacts.json 已经有了。要改名字或加名字，直接编辑这个文件（格式见 contacts.example.json），然后重启。`);
   }
+  const groupChat = contacts?.[0]?.type === "group";
   const first = contacts ? null : (requested ?? store.getSetting(LEGACY_CHAT_SETTING));
 
-  let open = { chat: "" };
+  let open: { chat: string; rows?: string[]; offset?: number | null } = { chat: "" };
   try {
-    open = await ui.snapshot();
+    open = await ui.snapshot(contacts?.flatMap((contact) => contact.names), groupChat);
   } catch (err) {
-    // With a contact set, wait for the chat like the poll loop does. Setting
-    // one up needs WeChat now, and a missing permission won't fix itself.
-    if (!(contacts || first) || (err instanceof HelperError && err.code === "no_accessibility_permission")) {
+    // An existing contact can wait for its chat to be opened. First-time setup
+    // must show the actual capture/permission error instead of hiding it behind
+    // the generic "chat name doesn't match" message below.
+    const canWaitForChat = Boolean(contacts) && err instanceof HelperError && err.code === "no_open_chat";
+    if (!canWaitForChat) {
       fail(`连不上微信：${(err as Error).message}`);
     }
+  }
+
+  if (contacts && open.chat && !contacts.some((contact) =>
+    contact.names.some((name) => contactNamesMatch(name, open.chat, contact.type === "group"))
+  )) {
+    fail(`微信当前打开的是「${open.chat}」。小拜只连接已配置的聊天「${contacts.flatMap((contact) => contact.names).join("」「")}」。请先在微信中打开群聊后重新启动。`);
   }
 
   if (first) {
@@ -128,12 +137,12 @@ async function main() {
   if (!contacts) {
     fail(
       open.chat
-        ? `还没设置聊天对象。微信当前打开的是「${open.chat}」；确认是和你的一对一聊天后，运行：\n  npm run dearbyte -- --chat ${open.chat}`
+        ? `还没设置聊天对象。微信当前打开的是「${open.chat}」；如要绑定这个聊天，运行：\n  npm run dearbyte -- --chat "${open.chat}"`
         : "还没设置聊天对象。先在 Mac 微信里点开和你的聊天，再运行 npm run dearbyte -- --chat <聊天名字>",
     );
   }
-  // Each contact needs its own history and memory before 小拜 can answer several people.
-  if (contacts!.length > 1) fail("data/contacts.json 里有多个联系人；现在只支持一个（每人单独的聊天记录和记忆还没做）");
+  // The current store is shared, so allow exactly one configured conversation type (direct or group).
+  if (contacts!.length > 1) fail("data/contacts.json 里只能设置一个聊天（个人或群聊）；独立聊天记录和记忆暂不支持多个聊天");
   const names = contacts![0].names;
 
   for (const [flag, apply] of [
@@ -147,7 +156,7 @@ async function main() {
       process.exit(1);
     }
   }
-  const proactiveEnabled = () => store.getSetting(PROACTIVE_SETTING) !== "false";
+  const proactiveEnabled = () => !groupChat && store.getSetting(PROACTIVE_SETTING) !== "false";
 
   let photos: PhotoFolder | null = null;
   if (config.wechatMediaDir) {
@@ -177,6 +186,8 @@ async function main() {
     ui,
     companion,
     names,
+    groupChat,
+    initialSnapshot: open.rows ? { chat: open.chat, rows: open.rows, offset: open.offset } : undefined,
     photos,
     mode: argv.includes("--draft") ? "draft" : "auto",
     onEvent: (e) => {
@@ -194,7 +205,7 @@ async function main() {
       : log(
       `模型 ${describeModel(config.model, fake)}${fake ? "（假模型，会发出标明是假的回复）" : ""} · ${store.messageCount()} 条聊天记录 · ` +
         `长期记忆${store.memoryEnabled() ? `开启（${store.activeFacts().length} 条）` : "关闭"} · ` +
-        `主动消息${proactiveEnabled() ? "开启" : "关闭"} · 时区 ${config.timeZone} · 微信「${names.join("」「")}」· ${channel.mode === "draft" ? "草稿模式（不发送）" : channel.paused ? "已暂停" : "自动回复"}`,
+        `主动消息${proactiveEnabled() ? "开启" : "关闭"} · 时区 ${config.timeZone} · 微信${groupChat ? "群聊" : "聊天"}「${names.join("」「")}」· ${channel.mode === "draft" ? "草稿模式（不发送）" : channel.paused ? "已暂停" : "自动回复"}`,
     );
   status();
 

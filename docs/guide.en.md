@@ -23,10 +23,10 @@ echo 'DEEPSEEK_API_KEY=sk-...' > .env   # gitignored
 ## Chat in WeChat (the real 小拜 account)
 
 You need:
-- **WeChat for Mac 4.x (tested on 4.1.13) or 3.8.4, with the English UI, logged in as 小拜.** On 4.x, photos are cut out of WeChat's window, so the terminal needs the Screen Recording permission (System Settings → Privacy & Security → Screen & System Audio Recording) and the chat must be scrolled to the bottom. Run one copy of the runner at a time: a second one refuses to start, because two would answer each other.
+- **WeChat for Mac 4.x (tested on 4.1.13) or 3.8.4, with the English UI, logged in as 小拜.** Some 4.1.x builds hide chat controls from Accessibility; in that case DearByte reads visible text locally with screen OCR. This text fallback needs the WeChat window visible on the current desktop and the terminal's Screen Recording permission (System Settings → Privacy & Security → Screen & System Audio Recording). Photo recognition still needs usable Accessibility controls. Keep the chat scrolled to the bottom. Run one copy of the runner at a time: a second one refuses to start, because two would answer each other.
 - **Accessibility permission** for your terminal app (System Settings → Privacy & Security → Accessibility).
 - **Swift** (Xcode Command Line Tools). The helper in `native/wechat-desktop/` is built automatically on first run.
-- **The chat with you open** in WeChat's main window, scrolled to the bottom. The window can sit on another desktop (Space), but don't close it, and don't open chats in separate windows.
+- **The chat with you open** in WeChat's main window, scrolled to the bottom. Don't close it or open chats in separate windows. When the text OCR fallback is active, keep the WeChat window visible on the current desktop.
 
 ```bash
 npm run dearbyte -- --chat 张三   # first run: creates data/contacts.json for this chat (the name shown at the top of the chat)
@@ -49,7 +49,7 @@ Then chat with 小拜 from your phone. The terminal shows each message, each bub
 
 ### Set the allowed contact
 
-1. In the main Mac WeChat window signed in as Xiaobai, open the one-to-one conversation Xiaobai should answer.
+1. In the main Mac WeChat window signed in as Xiaobai, open the conversation Xiaobai should answer.
 2. Use the name shown at the top of that chat, quoted in full (including any spaces):
 
 ```bash
@@ -73,15 +73,17 @@ To allow **other display names for the same person**, edit `data/contacts.json` 
 
 Replace these example aliases with the remark or nickname WeChat actually displays for that one person. `names` matches the title at the top of the chat, not the person's WeChat ID. The `id` field is an internal identifier; you can leave it as `me`. See [contacts.example.json](../contacts.example.json).
 
-Save, quit, and restart with `npm run dearbyte`. Once the file exists, `--chat` does not append or overwrite contacts: edit the file directly. Only one contact is supported. Do not list different people as aliases or add a second contact object. History and memory are not isolated per contact yet; changing the allowlist does not create a fresh, separate conversation.
+Save, quit, and restart with `npm run dearbyte`. Once the file exists, `--chat` does not append or overwrite the allowlist: edit the file directly. One conversation is supported at a time; it can be a direct chat or a group marked with `"type": "group"`. Group chats do not send proactive messages. History and memory are not isolated per conversation yet.
 
 If Xiaobai keeps waiting, check that the current chat title exactly matches an entry in `names` and that you restarted after editing. The file is ignored by Git because it contains real names.
 
 How it behaves:
-- **Who gets replies:** only the one-to-one chat listed in `data/contacts.json`. The file is gitignored because it holds real names; `contacts.example.json` shows the format. List every name WeChat may show at the top of that chat (the remark, the nickname, old names), so renaming the chat doesn't stop replies. Edit the file and restart to change it. Only one contact is supported for now: several would need separate history and memory per person, and a way to switch chats.
-- **Other chats:** if you open another chat on the Mac, 小拜 waits until it's back. Messages already in the chat when it starts are never answered. If a second person speaks in the chat (a group), it pauses.
-- **Bursts:** several quick messages (within about 1 s) become one turn.
-- **Timing:** the first bubble waits a moment as if reading it: about 0.6 s for 「在吗」, longer for a long message or a photo, at most 3 s (±25%), counting model time; later bubbles take about as long as typing them, with some jitter.
+- **Who gets replies:** only the conversation listed in `data/contacts.json`. Set `type` to `group` for a group; the default is a direct chat. List every name WeChat may show at the top, so a renamed chat still matches. Group messages from different senders do not pause replies, but group chats never send proactive messages. Only one conversation is supported because history and memory are shared.
+- **Other chats:** if you open another chat on the Mac, 小拜 waits until it's back. Messages already in the chat when it starts are never answered. A direct chat pauses if it sees a second sender; a configured group accepts multiple senders.
+- **Who gets replies:** only the conversation listed in `data/contacts.json`. Set `type` to `group` for a group; the default is a direct chat. List every name WeChat may show at the top, so a renamed chat still matches. Group messages from different senders do not pause replies, but group chats never send proactive messages. Only one conversation is supported because history and memory are shared.
+- **Other chats:** if you open another chat on the Mac, 小拜 waits until it's back. Messages already in the chat when it starts are never answered. A direct chat pauses if it sees a second sender; a configured group accepts multiple senders.
+- **Bursts:** direct-chat messages within about 1 s become one turn. Group messages are handled separately, with up to four replies in flight so one slow reply does not block other speakers. A bare-name message is saved to memory without a reply.
+- **Timing:** direct-chat replies wait about 0.6 s for a short message and up to 3 s for a long message or photo, counting model time. Group replies have no added reading or typing pause.
 - **Photos:** read from WeChat's local image folder for that chat (`COMPANION_WECHAT_MEDIA_DIR`). Without it, 小拜 is told it can't see the picture. Stickers, voice, video and files are described to 小拜 as things it can't open.
 - **Writing first:** 小拜 sometimes messages you unprompted, like a friend would:
   - a good morning on some days (about 6 in 10), at a random time between 8:00 and 9:30, if you haven't talked yet that day;
@@ -92,7 +94,8 @@ How it behaves:
   If you ask for space (「别给我发消息了」「让我静静」), it doesn't write first for 3 days. For 3 days after a message that looked like a crisis, anything it starts is only a gentle 「这两天缓过来点没」-style check-in. A message is stored in the chat history only once it has actually been sent. If you write while 小拜 is composing one, it's dropped and your message is answered instead. It never writes between 22:30 and 8:00, sends at most 2 a day, waits 90 minutes after a conversation, and never sends another until you've replied to the last one. It checks once a minute and only when the chat is open and replies aren't paused. Draft mode never writes first.
 - **Alerts:** if 小拜 isn't answering for a minute (chat closed or renamed to a name not in the list, WeChat not running, the chat reading empty, or replies paused), you get a macOS notification with the reason, and another when it recovers. A bubble that can't be sent alerts too, at most once per 10 minutes. For alerts on your phone, set `COMPANION_ALERT_URL` to an [ntfy](https://ntfy.sh) topic URL (e.g. `https://ntfy.sh/<a-long-random-name>`) and subscribe to it in the ntfy app. The push says only that 小拜 stopped or recovered, never chat names; the details stay in the Mac notification. Make the topic name hard to guess anyway.
 - **Staying awake:** the Mac is kept from idle sleep while 小拜 runs (`caffeinate`). The display can still sleep. Closing the lid still sleeps a MacBook unless it's on power with an external display.
-- **Sending:** the helper types each bubble into the composer and presses Return, then confirms the bubble appeared. It never sends while someone has a draft in the composer, and never resends a bubble it couldn't confirm.
+- **Sending:** the helper replaces any text in the composer with each generated bubble, presses Return, then confirms the bubble appeared. If one bubble can't be confirmed, it skips that bubble and tries the remaining bubbles without resending the uncertain one.
+- **Stalled replies:** if the model takes more than 18 seconds, Xiaobai cancels that request, sends a short fallback reply, and continues with queued messages. A stalled WeChat read is also restarted after 12 seconds once startup is complete.
 
 **Risk:** Tencent doesn't allow automating WeChat. The 小拜 account could be restricted, so use a test account, not your personal one. This route is for the demo only and can't be part of a product.
 
