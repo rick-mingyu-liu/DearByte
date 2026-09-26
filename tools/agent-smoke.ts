@@ -5,10 +5,12 @@
 //
 //   npm run agent:smoke            # the worker tier (DeepSeek by default)
 //   npm run agent:smoke -- brain   # the brain tier (DEARBYTE_BRAIN in .env)
+//   npm run agent:smoke -- worker "do you love me"   # any question; DEARBYTE_PERSONA picks the persona
 
 import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
-import { loadConfig } from "../src/config.ts";
+import { loadConfig, ROOT } from "../src/config.ts";
+import { agentSystemPrompt, withCurrentTime } from "../src/agent/persona.ts";
 import { runAgent } from "../src/agent/loop.ts";
 import { createTierModels, TIERS, type Tier } from "../src/agent/tiers.ts";
 import { defineTool, ToolRegistry } from "../src/agent/tools.ts";
@@ -21,6 +23,11 @@ if ("problem" in config.agent) {
   console.error(config.agent.problem);
   process.exit(1);
 }
+if (typeof config.agentPersona !== "string") {
+  console.error(config.agentPersona.problem);
+  process.exit(1);
+}
+const question = process.argv[3] ?? "How did I sleep, and should I still do leg day tonight?";
 // Logged like any other run, and stopped by the weekly cap like any other run.
 const store = Store.open(config.dbPath);
 const model = createTierModels(config.agent, { store, weeklyCap: config.agentWeeklyCap })[tier];
@@ -45,8 +52,8 @@ try {
   const result = await runAgent({
     model,
     tools,
-    system: "You are DearByte's agent. Use tools to check facts before answering. Be brief.",
-    messages: [{ role: "user", content: "How did I sleep, and should I still do leg day tonight?" }],
+    system: agentSystemPrompt(ROOT, config.agentPersona),
+    messages: [{ role: "user", content: withCurrentTime(question, new Date(), config.timeZone) }],
     purpose: "smoke",
     onEvent: (e) =>
       console.log(

@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { resolveTiers, type Tier, type TierSettings } from "./agent/tiers.ts";
 import { DEFAULT_WEEKLY_CAP } from "./agent/usage.ts";
+import { PERSONAS, type Persona } from "./agent/persona.ts";
 import { resolveModel, type ModelSettings } from "./model/providers.ts";
 
 export const ROOT = new URL("..", import.meta.url).pathname;
@@ -13,6 +14,8 @@ export type Config = {
   agent: Record<Tier, TierSettings> | { problem: string };
   /** USD the agent may spend over any 7 days (0 turns the cap off). */
   agentWeeklyCap: number;
+  /** The agent's persona, or what's wrong with DEARBYTE_PERSONA. */
+  agentPersona: Persona | { problem: string };
   dbPath: string;
   timeZone: string;
   historyMessages: number;
@@ -47,6 +50,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     model: resolveModel(merged),
     agent: resolveTiers(merged),
     agentWeeklyCap: nonNegative(merged.DEARBYTE_WEEKLY_CAP, DEFAULT_WEEKLY_CAP),
+    agentPersona: resolvePersona(merged.DEARBYTE_PERSONA),
     dbPath: merged.COMPANION_DB || join(ROOT, "data/companion.sqlite"),
     timeZone: merged.COMPANION_TZ || Intl.DateTimeFormat().resolvedOptions().timeZone,
     historyMessages: Number(merged.COMPANION_HISTORY_MESSAGES || 40),
@@ -54,4 +58,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     wechatMediaDir: merged.COMPANION_WECHAT_MEDIA_DIR || null,
     alertUrl: merged.COMPANION_ALERT_URL || null,
   };
+}
+
+function resolvePersona(value: string | undefined): Persona | { problem: string } {
+  const name = (value || "default").trim().toLowerCase();
+  return (PERSONAS as readonly string[]).includes(name) ? (name as Persona) : { problem: `DEARBYTE_PERSONA should be one of ${PERSONAS.join(", ")}` };
 }
