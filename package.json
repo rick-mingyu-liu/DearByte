@@ -12,9 +12,11 @@
     "dearbyte": "tsx src/dearbyte.ts",
     "bakeoff": "tsx tools/bakeoff.ts",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "agent:smoke": "tsx --env-file-if-exists=.env tools/agent-smoke.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "0.128.0",
     "zod": "4.6.5"
   },
   "devDependencies": {
