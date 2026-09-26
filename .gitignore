@@ -4,3 +4,4 @@ data/
 *.log
 /.omc
 node_modules/
+/watchlist.json

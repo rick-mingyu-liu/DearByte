@@ -20,7 +20,7 @@ export function approvalText(a: Approval): string {
   return `Approval needed\n\n${a.summary}\n\nThis expires in ${Math.round(APPROVAL_TTL_MS / 60_000)} minutes.`;
 }
 
-export function proposeApproval(store: ApprovalStore, p: { kind: string; summary: string; payload: unknown }, now: Date): Approval {
+export function proposeApproval(store: Pick<ApprovalStore, "createApproval">, p: { kind: string; summary: string; payload: unknown }, now: Date): Approval {
   return store.createApproval({ ...p, createdAt: now.toISOString(), expiresAt: new Date(now.getTime() + APPROVAL_TTL_MS).toISOString() });
 }
 

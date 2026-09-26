@@ -11,11 +11,16 @@
 //   npm run agent -- watch             keep running: brief at 07:30, checks every 15 min
 //   npm run agent -- alerts            what DearByte sent on its own lately
 //   npm run agent -- telegram          set up Telegram, or test it with a sample approval
+//   npm run agent -- news              check the company watchlist once
+//   npm run agent -- wallet [new]      the testnet wallet: address, balance, limits
+//   npm run agent -- approvals         requests waiting for your yes
+//   npm run agent -- approve|reject N  answer one in the terminal
 
 import { createInterface } from "node:readline/promises";
 import Anthropic from "@anthropic-ai/sdk";
 import { loadConfig, ROOT } from "./config.ts";
 import { dim } from "./console.ts";
+import { localDate } from "./companion/time.ts";
 import { runAgent, type LoopEvent, type LoopResult } from "./agent/loop.ts";
 import type { AgentMessage } from "./agent/model.ts";
 import { agentSystemPrompt, withCurrentTime } from "./agent/persona.ts";
@@ -23,11 +28,20 @@ import { createTierModels } from "./agent/tiers.ts";
 import { agentToolset } from "./agent/toolset.ts";
 import { WEEK_MS } from "./agent/usage.ts";
 import { runCautionCheck, runMorningBrief, tick, type Notify, type Outcome, type ScheduledDeps } from "./agent/scheduled.ts";
-import { proposeApproval, type ApprovalHandlers } from "./agent/approvals.ts";
+import { approvalText, decide, proposeApproval, type ApprovalHandlers } from "./agent/approvals.ts";
 import { systemNotifier } from "./alerts.ts";
 import { Store } from "./storage/store.ts";
 import { TelegramBot } from "./telegram/bot.ts";
 import { feedbackButtons, pollInbox, sendApproval, type InboxDeps } from "./telegram/inbox.ts";
+import { checkWatchlist, type WatchlistDeps, type WatchOutcome } from "./watchlist/check.ts";
+import { loadWatchlist } from "./watchlist/config.ts";
+import { appendFileSync, chmodSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { createPublicClient, erc20Abi, http } from "viem";
+import { baseSepolia } from "viem/chains";
+import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
+import { EXPLORER_TX, formatUsd, RPC_URL, USDC } from "./wallet/config.ts";
+import { purchaseHandler, type WalletDeps } from "./wallet/purchase.ts";
 
 const USAGE = `Usage:
   npm run agent -- ask "question"   answer one question
@@ -37,11 +51,15 @@ const USAGE = `Usage:
   npm run agent -- check            run the caution rules once
   npm run agent -- watch            keep running: brief at 07:30, caution checks every 15 min
   npm run agent -- alerts           recent briefs and alerts
-  npm run agent -- telegram         set up Telegram, or test it`;
+  npm run agent -- telegram         set up Telegram, or test it
+  npm run agent -- news             check the company watchlist now
+  npm run agent -- wallet [new]     the testnet wallet (new: create one)
+  npm run agent -- approvals        requests waiting for your yes
+  npm run agent -- approve N        approve request N (or: reject N)`;
 
 const config = loadConfig();
 const [command, ...rest] = process.argv.slice(2);
-if (!["ask", "chat", "status", "brief", "check", "watch", "alerts", "telegram"].includes(command ?? "")) {
+if (!["ask", "chat", "status", "brief", "check", "watch", "alerts", "telegram", "news", "wallet", "approvals", "approve", "reject"].includes(command ?? "")) {
   console.log(USAGE);
   process.exit(command ? 1 : 0);
 }
@@ -52,16 +70,31 @@ const tiers = config.agent;
 
 const store = Store.open(config.dbPath);
 const models = createTierModels(tiers, { store, weeklyCap: config.agentWeeklyCap });
-const { tools, health, bridge } = agentToolset({ store, timeZone: config.timeZone, healthMcpUrl: config.healthMcpUrl });
-const system = agentSystemPrompt(ROOT, persona);
+const loadedWatchlist = loadWatchlist(config.watchlistPath);
+if (loadedWatchlist && "problem" in loadedWatchlist) console.error(dim(`Watchlist ignored: ${loadedWatchlist.problem}`));
+const watchlist = loadedWatchlist && !("problem" in loadedWatchlist) ? loadedWatchlist : null;
 if (config.telegram && "problem" in config.telegram) fail(config.telegram.problem);
 const telegramSetup = config.telegram;
 /** Telegram, once both the token and the chat are known. */
 const telegram = telegramSetup?.chatId ? { bot: new TelegramBot(telegramSetup.token), chatId: telegramSetup.chatId } : null;
+if (config.wallet && "problem" in config.wallet) fail(config.wallet.problem);
+const wallet: WalletDeps | null = config.wallet
+  ? {
+      wallet: config.wallet,
+      store,
+      timeZone: config.timeZone,
+      sendApproval: telegram ? async (a) => (await sendApproval(telegram.bot, telegram.chatId, a), true) : undefined,
+      // Printed by code, so what you approve is never just the model's retelling.
+      announce: (a) => console.log(`\n── Approval #${a.id} ──\n${approvalText(a)}\nTo answer: /approve ${a.id} or /reject ${a.id} in chat, or npm run agent -- approve ${a.id}\n`),
+    }
+  : null;
+const { tools, health, bridge } = agentToolset({ store, timeZone: config.timeZone, healthMcpUrl: config.healthMcpUrl, watchlist, wallet });
+const system = agentSystemPrompt(ROOT, persona);
 
-/** What each kind of approval does once approved. The wallet adds "purchase". */
+/** What each kind of approval does once approved. A kind without a handler can't be approved. */
 const approvalHandlers: ApprovalHandlers = {
   test: async () => "This was a test, so nothing else happens.",
+  ...(wallet ? { purchase: purchaseHandler(wallet) } : {}),
 };
 
 function fail(message: string): never {
@@ -119,6 +152,18 @@ function status(): void {
   console.log(`Tools:   ${tools.definitions().map((t) => t.name).join(", ")}`);
   console.log(`Health:  ${health ? "connected to dearbyte-bridge (HEALTH_MCP_URL)" : "not set up (add HEALTH_MCP_URL to .env; see dearbyte-bridge docs/SETUP.md)"}`);
   console.log(`Alerts:  ${telegram ? "Telegram, then the terminal" : telegramSetup ? "the terminal (Telegram needs TELEGRAM_CHAT_ID: npm run agent -- telegram)" : "the terminal and macOS notifications (npm run agent -- telegram to set up Telegram)"}`);
+  console.log(
+    `News:    ${
+      watchlist
+        ? `${watchlist.companies.map((c) => c.name).join(", ")} (newsrooms${config.secContact ? " and SEC filings" : "; SEC filings need SEC_CONTACT_EMAIL"})`
+        : "no watchlist (copy watchlist.example.json to watchlist.json)"
+    }`,
+  );
+  console.log(
+    `Wallet:  ${
+      wallet ? `testnet, ${wallet.wallet.sellers.length} approved seller${wallet.wallet.sellers.length === 1 ? "" : "s"} · npm run agent -- wallet` : "not set up (npm run agent -- wallet new)"
+    }`,
+  );
   const fb = store.alertFeedback(new Date(Date.now() - WEEK_MS).toISOString().slice(0, 10));
   if (fb.sent) console.log(`Rated:   ${fb.sent} alerts in the last 7 days, ${fb.useful} useful, ${fb.noise} not useful`);
   console.log(`Memory:  ${store.memoryEnabled() ? `on, ${store.activeFacts().length} facts` : "off"}`);
@@ -152,6 +197,17 @@ function scheduledDeps(): ScheduledDeps {
   return { bridge, store, model: models.brain, tools, system, timeZone: config.timeZone, notify, onEvent: (e) => console.log(dim(describeEvent(e))) };
 }
 
+function watchlistDeps(): WatchlistDeps {
+  if (!watchlist) fail("No watchlist: copy watchlist.example.json to watchlist.json and edit it.");
+  return { store, model: models.brain, worker: models.worker, tools, system, timeZone: config.timeZone, notify, watchlist, secContact: config.secContact, onEvent: (e) => console.log(dim(describeEvent(e))) };
+}
+
+function reportNews(o: WatchOutcome): void {
+  for (const e of o.errors) console.error(dim(`source failed: ${e}`));
+  console.log(dim(`news: ${o.added} new, ${o.screened} screened, ${o.relevant} worth a message`));
+  if (o.message) report(o.message);
+}
+
 function report(o: Outcome): void {
   if (!o.sent) console.log(dim(`nothing sent: ${o.reason}${o.triggers.length ? ` (rules: ${o.triggers.map((t) => t.kind).join(", ")})` : ""}`));
   else if (!o.delivered) console.log("Written, but delivery failed; it's saved in npm run agent -- alerts.");
@@ -168,10 +224,17 @@ function listAlerts(): void {
 }
 
 const TICK_MS = 15 * 60_000;
+/** The watchlist is checked every this many ticks (hourly). */
+const NEWS_EVERY = 4;
 
 async function watch(): Promise<void> {
-  const deps = scheduledDeps();
-  console.log(dim(`Watching: morning brief after 07:30, caution checks every 15 minutes, quiet 23:00-07:00 (${config.timeZone}). Ctrl-C to stop.`));
+  // Health and news each run when they're set up; at least one must be.
+  const deps = bridge ? scheduledDeps() : null;
+  const news = watchlist ? watchlistDeps() : null;
+  if (!deps && !news) fail("Nothing to watch: set up health (HEALTH_MCP_URL) or a watchlist (watchlist.json).");
+  if (deps) console.log(dim(`Health: morning brief after 07:30, caution checks every 15 minutes, quiet 23:00-07:00 (${config.timeZone}).`));
+  if (news) console.log(dim(`News: checking ${news.watchlist.companies.length} companies every hour.`));
+  console.log(dim("Ctrl-C to stop."));
   if (telegram) {
     // Button taps are handled alongside the checks, for as long as watch runs.
     const stop = new AbortController();
@@ -183,12 +246,19 @@ async function watch(): Promise<void> {
     });
     console.log(dim("Telegram: sending alerts and listening for button taps."));
   }
-  for (;;) {
+  for (let n = 0; ; n++) {
     try {
-      report(await tick(deps));
+      if (deps) report(await tick(deps));
     } catch (err) {
       // One failed tick (bridge down, model error) must not stop the loop.
       console.error(dim(`check failed: ${(err as Error).message}`));
+    }
+    if (news && n % NEWS_EVERY === 0) {
+      try {
+        reportNews(await checkWatchlist(news));
+      } catch (err) {
+        console.error(dim(`news check failed: ${(err as Error).message}`));
+      }
     }
     await new Promise((r) => setTimeout(r, TICK_MS));
   }
@@ -234,8 +304,99 @@ async function telegramCommand(): Promise<void> {
   console.log(decided?.status === "pending" ? "No tap arrived. Check the bot token and chat id, then try again." : `Telegram works: the test was ${decided?.status}.`);
 }
 
+/** Answers an approval request from the terminal. */
+async function answerApproval(id: number, verdict: "approve" | "reject"): Promise<void> {
+  const d = await decide(store, approvalHandlers, id, verdict, { now: new Date(), via: "terminal" });
+  if (d.status === "approved") console.log(`✅ Approved. ${d.result}`);
+  else if (d.status === "rejected") console.log(verdict === "approve" ? "❌ Not done: nothing here can carry this out (is the wallet set up?)." : "❌ Rejected. Nothing was done.");
+  else if (d.status === "expired") console.log("⌛ That request expired. Nothing was done.");
+  else if (d.status === "already_decided") console.log(`Request ${id} was already ${d.approval?.status}.`);
+  else console.log(`There's no request ${id}.`);
+}
+
+function listApprovals(): void {
+  const pending = store.pendingApprovals(new Date().toISOString());
+  if (!pending.length) return console.log("Nothing is waiting for your approval.");
+  for (const a of pending) {
+    console.log(dim(`#${a.id} · ${a.kind} · expires ${a.expiresAt.slice(11, 16)} UTC`));
+    console.log(`${a.summary}\n`);
+  }
+  console.log(dim("npm run agent -- approve N, or reject N"));
+}
+
+async function walletCommand(): Promise<void> {
+  if (rest[0] === "new") {
+    const envPath = join(ROOT, ".env");
+    let env = "";
+    try {
+      env = readFileSync(envPath, "utf8");
+    } catch {
+      // no .env yet: it's created below
+    }
+    if (/^\s*DEARBYTE_WALLET_KEY\s*=/m.test(env)) fail("There's already a DEARBYTE_WALLET_KEY in .env. Remove it first if you really want a new wallet.");
+    const key = generatePrivateKey();
+    // The key goes straight into .env (ignored by Git) and is never printed.
+    appendFileSync(envPath, `${env && !env.endsWith("\n") ? "\n" : ""}# DearByte testnet wallet (Base Sepolia). Test funds only; never send real money here.\nDEARBYTE_WALLET_KEY=${key}\n`, { mode: 0o600 });
+    chmodSync(envPath, 0o600); // only you can read the key
+    console.log(`Created a testnet wallet and saved its key to .env.\nAddress: ${privateKeyToAccount(key).address}`);
+    console.log("Next: get free test USDC at https://faucet.circle.com (network: Base Sepolia), and set DEARBYTE_SELLERS to the sellers you allow.");
+    return;
+  }
+  if (!wallet) return console.log("No wallet yet: npm run agent -- wallet new");
+  const w = wallet.wallet;
+  console.log(`Address:  ${w.address}`);
+  console.log("Network:  Base Sepolia (testnet), test USDC");
+  try {
+    const client = createPublicClient({ chain: baseSepolia, transport: http(RPC_URL, { timeout: 10_000 }) });
+    const balance = await client.readContract({ address: USDC, abi: erc20Abi, functionName: "balanceOf", args: [w.address] });
+    console.log(`Balance:  ${formatUsd(balance)} test USDC${balance === 0n ? " (get some at https://faucet.circle.com)" : ""}`);
+  } catch {
+    console.log("Balance:  couldn't reach Base Sepolia right now");
+  }
+  const today = store.paidOn(localDate(new Date(), config.timeZone));
+  console.log(`Limits:   ${formatUsd(w.maxPerPurchase)} per purchase, ${formatUsd(w.maxPerDay)} per day (${formatUsd(today)} spent today)`);
+  console.log(`Sellers:  ${w.sellers.length ? w.sellers.join(", ") : "none approved yet (set DEARBYTE_SELLERS)"}`);
+  const recent = store.recentPurchases(5);
+  if (recent.length) console.log("Recent:");
+  for (const p of recent) {
+    console.log(`  #${p.id} ${p.at.slice(0, 16).replace("T", " ")} ${formatUsd(BigInt(p.amount))} ${p.description} · ${p.status}${p.tx ? ` · ${EXPLORER_TX}${p.tx}` : ""}${p.error ? ` · ${p.error}` : ""}`);
+  }
+}
+
+/** Shows the request in code's words and asks for a yes before anything is paid. */
+async function confirmApproval(id: number, ask: (q: string) => Promise<string>): Promise<boolean> {
+  const a = store.approval(id);
+  if (!a || a.status !== "pending") return true; // answerApproval explains
+  console.log(`\n${approvalText(a)}\n`);
+  const yes = /^y(es)?$/i.test((await ask("Approve this? Type yes to confirm: ")).trim());
+  if (!yes) console.log("Not approved. Nothing was done.");
+  return yes;
+}
+
+/** "approve 3" / "reject 3" → the id, or null. */
+function approvalId(arg: string | undefined): number | null {
+  const id = Number(arg);
+  return Number.isInteger(id) && id > 0 ? id : null;
+}
+
 async function main(): Promise<void> {
+  if (command === "wallet") return walletCommand();
+  if (command === "approvals") return listApprovals();
+  if (command === "approve" || command === "reject") {
+    const id = approvalId(rest[0]);
+    if (id === null) fail(`Which one? npm run agent -- ${command} N (see npm run agent -- approvals)`);
+    if (command === "approve") {
+      const rl = createInterface({ input: process.stdin, output: process.stdout });
+      const yes = await confirmApproval(id, (q) => rl.question(q)).finally(() => rl.close());
+      if (!yes) return;
+    }
+    return answerApproval(id, command);
+  }
   if (command === "telegram") return telegramCommand();
+  if (command === "news") {
+    if (loadedWatchlist && "problem" in loadedWatchlist) fail(loadedWatchlist.problem);
+    return reportNews(await checkWatchlist(watchlistDeps()));
+  }
   if (command === "status") return status();
   if (command === "alerts") return listAlerts();
   if (command === "brief") return report(await runMorningBrief(scheduledDeps(), { force: rest.includes("--force") }));
@@ -249,14 +410,40 @@ async function main(): Promise<void> {
     return;
   }
 
-  console.log(dim(`DearByte · ${tiers.brain.model} · ${health ? "health connected" : "no health data yet"} · /quit to leave\n`));
+  console.log(dim(`DearByte · ${tiers.brain.model} · ${health ? "health connected" : "no health data yet"} · /quit to leave${wallet ? ", /approve N or /reject N to answer a purchase" : ""}\n`));
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   let messages: AgentMessage[] = [];
+  /** An approval waiting for the user's "yes". */
+  let confirming: number | null = null;
   rl.setPrompt("you › ");
   rl.prompt();
   for await (const raw of rl) {
     const line = raw.trim();
     if (line === "/quit") break;
+    // Approvals are answered by code here, never passed to the model.
+    if (confirming !== null) {
+      const id = confirming;
+      confirming = null;
+      if (/^y(es)?$/i.test(line)) await answerApproval(id, "approve");
+      else console.log("Not approved. Nothing was done.");
+      rl.prompt();
+      continue;
+    }
+    const answer = line.match(/^\/(approve|reject)\s+(\d+)$/);
+    if (answer) {
+      const id = Number(answer[2]);
+      const a = store.approval(id);
+      if (answer[1] === "approve" && a?.status === "pending") {
+        // Show code's summary and wait for a yes on the next line.
+        console.log(`\n${approvalText(a)}\n`);
+        console.log("Approve this? Type yes to confirm.");
+        confirming = id;
+      } else {
+        await answerApproval(id, answer[1] as "approve" | "reject");
+      }
+      rl.prompt();
+      continue;
+    }
     if (line) {
       const result = await turn(messages, line, "chat");
       // Keep the conversation only when it ended cleanly, so the next turn never follows a half-finished one.

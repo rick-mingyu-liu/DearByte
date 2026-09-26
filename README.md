@@ -44,8 +44,8 @@ DearByte is early and built in the open. What works today and what's coming:
 | Calendar awareness (Apple Calendar, via the same iPhone app) | Planned |
 | Caution alerts and a morning brief, judged against your own normal sleep, resting heart rate and HRV | **Works**; the calendar part waits for calendar awareness |
 | Telegram for alerts, a 👍/👎 on every alert, and Approve/Reject buttons | **Works** |
-| Company watchlist: official newsroom feeds and SEC filings | Planned |
-| Testnet wallet: the agent proposes a paid service, you approve, it pays within a cap, and you get a receipt | Planned |
+| Company watchlist: official newsroom feeds and SEC filings, screened against what you care about | **Works** |
+| Testnet wallet: the agent proposes a paid service, you approve, it pays within a cap, and you get a receipt | **Works** with x402 on Base Sepolia; a live on-chain payment needs test USDC from the faucet |
 
 ## Roadmap
 
@@ -55,8 +55,8 @@ DearByte is early and built in the open. What works today and what's coming:
 - [x] Daily health snapshots, so DearByte learns your normal sleep, resting heart rate and HRV
 - [x] Caution alerts and a morning brief, with quiet hours and a daily limit (calendar comes in Phase 2)
 - [x] Telegram for alerts, and Approve/Reject buttons
-- [ ] Company watchlist: official newsroom feeds and SEC filings, with relevance filtered against what you care about
-- [ ] Testnet wallet demo: the agent proposes a paid service, you approve, it pays in test USDC within a cap, and you get a receipt
+- [x] Company watchlist: official newsroom feeds and SEC filings, with relevance filtered against what you care about
+- [x] Testnet wallet demo: the agent proposes a paid service, you approve, it pays in test USDC within a cap, and you get a receipt
 
 **Phase 2: daily use, measured**
 - Two weeks of real use with feedback on every alert; measure precision, missed events, delay and cost per month
@@ -108,9 +108,50 @@ All settings go in `.env`.
 | `DEARBYTE_WEEKLY_CAP` | `5` | USD the agent may spend on model calls in any 7 days; `0` turns the cap off |
 | `HEALTH_MCP_URL` | — | Your dearbyte-bridge MCP address. It contains a secret, so treat it like a password |
 | `TELEGRAM_BOT_TOKEN` | — | Your bot's token from @BotFather. Secret: whoever has it controls the bot |
+| `SEC_CONTACT_EMAIL` | — | SEC asks automated clients for a contact email; without it the watchlist reads newsrooms only |
+| `DEARBYTE_WATCHLIST` | `watchlist.json` | Where your watchlist is |
+| `DEARBYTE_WALLET_KEY` | — | The testnet wallet's key; `npm run agent -- wallet new` creates it and writes it here |
+| `DEARBYTE_SELLERS` | — | Comma-separated seller addresses the wallet may buy from, like `http://127.0.0.1:4021` |
+| `DEARBYTE_MAX_PURCHASE` | `0.25` | USD limit per purchase |
+| `DEARBYTE_MAX_DAY` | `1` | USD limit per day |
 | `TELEGRAM_CHAT_ID` | — | Your chat with the bot; `npm run agent -- telegram` finds it. Only this chat can use the buttons |
 
 A model without a known price is refused, so the spending caps always work.
+
+### Company watchlist
+
+Copy `watchlist.example.json` to `watchlist.json` (ignored by Git) and edit it. `interests` says, in your words, what's worth a message; each company has its newsroom feeds and, optionally, its SEC number (`cik`).
+
+```bash
+npm run agent -- news    # check once; `watch` checks every hour
+```
+
+Only official sources are read: each company's newsroom feed and its SEC filings (8-K, 10-Q, 10-K and similar; not insider trades). Each check:
+1. Stores what's new, deduped by source id. Anything already 2 days old when first seen is recorded but never screened.
+2. The worker model screens new items against your `interests` and records a verdict and a reason for each, through a validated tool call.
+3. The brain writes one short message about what passed. The links are appended by code from the stored items, not written by the model.
+
+News follows the same quiet hours as health, with at most 3 news messages a day. The agent can also answer "anything new on Meta?" from what was collected (`get_company_news`).
+
+### Testnet wallet
+
+DearByte can buy things for you from sellers you approve, over [x402](https://www.x402.org) (HTTP 402 "Payment Required", paid in USDC). Phase 1 is **testnet only**: Base Sepolia and test USDC, never real money.
+
+```bash
+npm run agent -- wallet new          # creates a key, writes it to .env, prints the address
+# get free test USDC at https://faucet.circle.com (network: Base Sepolia)
+npm run seller -- --dev              # an example seller on http://127.0.0.1:4021
+DEARBYTE_SELLERS=http://127.0.0.1:4021 npm run agent -- chat
+```
+
+1. **You ask, it proposes.** For example: "I slept 5 hours; get me the recovery plan at http://127.0.0.1:4021/recovery-plan." The model can only call `propose_purchase`. Code then:
+   - asks the seller its price (the 402 answer);
+   - checks the seller allowlist and the per-purchase and daily caps;
+   - sends you an approval request.
+2. **You approve** with the button in Telegram, `/approve N` in chat, or `npm run agent -- approve N`. You always see the request as code wrote it (price, seller, recipient first), and in the terminal you confirm with "yes". At most 3 requests wait at once, and each expires after 15 minutes.
+3. **It pays, and you get a receipt.** Code asks for a fresh quote and refuses if the recipient changed or the price went up. It then reserves the amount against the daily limit, signs a transfer for exactly the approved amount (valid for at most 5 minutes), gets the resource, and keeps the receipt with its transaction link. If a signed payment goes out but no transaction comes back, the receipt says "unconfirmed" and the amount still counts toward the limit. `npm run agent -- wallet` shows the balance, limits and recent purchases.
+
+The example seller's `--dev` mode checks the signature without touching the chain, so you can demo the whole flow before the faucet. Without `--dev` (and with `SELLER_PAY_TO` set), payments settle on Base Sepolia through the x402.org facilitator. The seller moves to its own repo as the start of the seller SDK.
 
 ### Telegram
 
@@ -140,7 +181,7 @@ you ─ CLI / Telegram ─┐
 
 - **Our own agent loop** (`src/agent/`): the model proposes tool calls, and every call is checked against a schema before it runs. Tool errors go back to the model instead of crashing the loop. No tools run after a refusal or a cut-off call, and each run stops at 8 steps or $0.50.
 - **Any model, one interface:** Claude and DeepSeek both go through Anthropic's SDK (DeepSeek through its Anthropic-compatible endpoint). Claude-only features, such as adaptive thinking and refusal fallbacks, are sent only to Claude.
-- **Approvals will live outside the model** (the design for the wallet, not built yet). The model can only propose a purchase. Payment code runs only when you approve, with caps and a seller allowlist checked in code.
+- **Approvals live outside the model.** The model can only propose a purchase. Payment code runs only when you approve (in Telegram or the terminal), with caps and a seller allowlist checked in code, and each approval is decided once.
 - **Prompts stay cacheable:** the system prompt is identical on every request, and the current time goes into the message instead.
 
 ## Data and privacy

@@ -97,6 +97,47 @@ CREATE TABLE IF NOT EXISTS approvals (
   decided_at TEXT,
   decided_via TEXT
 );
+
+-- Company news from official sources. (company, source, external_id) dedupes across
+-- checks. status: new (not screened yet), old (stale), relevant / skipped
+-- (the screen's verdict, with its reason), sending (claimed by one check), sent.
+CREATE TABLE IF NOT EXISTS watch_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  company TEXT NOT NULL,
+  source TEXT NOT NULL,
+  external_id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  url TEXT NOT NULL,
+  published_at TEXT NOT NULL,
+  summary TEXT NOT NULL,
+  seen_at TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('new', 'old', 'relevant', 'skipped', 'sending', 'sent')),
+  reason TEXT,
+  UNIQUE (company, source, external_id)
+);
+CREATE INDEX IF NOT EXISTS watch_items_status ON watch_items (status);
+
+-- What the wallet paid for: one row per approved purchase, with the
+-- on-chain transaction as the receipt. amount is in the token's smallest
+-- unit (USDC has 6 decimals). status: pending (reserved, being paid), paid
+-- (a transaction came back), unconfirmed (a signed payment went out but no
+-- transaction came back: it may still be charged), failed (nothing signed
+-- went out). Everything but failed counts toward the daily limit.
+CREATE TABLE IF NOT EXISTS purchases (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  approval_id INTEGER NOT NULL UNIQUE,
+  at TEXT NOT NULL,
+  date TEXT NOT NULL,
+  url TEXT NOT NULL,
+  description TEXT NOT NULL,
+  amount TEXT NOT NULL,
+  network TEXT NOT NULL,
+  pay_to TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('pending', 'paid', 'unconfirmed', 'failed')),
+  tx TEXT,
+  error TEXT,
+  result TEXT
+);
 `;
 
 /**
@@ -202,6 +243,68 @@ const toApproval = (r: ApprovalRow): Approval => ({
   status: r.status,
   decidedAt: r.decided_at,
   decidedVia: r.decided_via,
+});
+
+export type WatchStatus = "new" | "old" | "relevant" | "skipped" | "sending" | "sent";
+export type WatchItem = {
+  id: number;
+  company: string;
+  source: string;
+  externalId: string;
+  title: string;
+  url: string;
+  publishedAt: string;
+  summary: string;
+  seenAt: string;
+  status: WatchStatus;
+  reason: string | null;
+};
+type WatchRow = { id: number; company: string; source: string; external_id: string; title: string; url: string; published_at: string; summary: string; seen_at: string; status: WatchStatus; reason: string | null };
+const toWatchItem = (r: WatchRow): WatchItem => ({
+  id: r.id,
+  company: r.company,
+  source: r.source,
+  externalId: r.external_id,
+  title: r.title,
+  url: r.url,
+  publishedAt: r.published_at,
+  summary: r.summary,
+  seenAt: r.seen_at,
+  status: r.status,
+  reason: r.reason,
+});
+
+export type PurchaseStatus = "pending" | "paid" | "unconfirmed" | "failed";
+export type Purchase = {
+  id: number;
+  approvalId: number;
+  at: string;
+  date: string;
+  url: string;
+  description: string;
+  amount: string;
+  network: string;
+  payTo: string;
+  status: PurchaseStatus;
+  tx: string | null;
+  error: string | null;
+  result: string | null;
+};
+type PurchaseRow = { id: number; approval_id: number; at: string; date: string; url: string; description: string; amount: string; network: string; pay_to: string; status: PurchaseStatus; tx: string | null; error: string | null; result: string | null };
+const toPurchase = (r: PurchaseRow): Purchase => ({
+  id: r.id,
+  approvalId: r.approval_id,
+  at: r.at,
+  date: r.date,
+  url: r.url,
+  description: r.description,
+  amount: r.amount,
+  network: r.network,
+  payTo: r.pay_to,
+  status: r.status,
+  tx: r.tx,
+  error: r.error,
+  result: r.result,
 });
 
 export type UpsertResult = "inserted" | "updated" | "unchanged" | "blocked";
@@ -487,6 +590,93 @@ export class Store {
 
   recentApprovals(limit: number): Approval[] {
     return (this.db.prepare("SELECT * FROM approvals ORDER BY id DESC LIMIT ?").all(limit) as ApprovalRow[]).map(toApproval);
+  }
+
+  /** Adds the items not seen before, each with its starting status; returns only those added. */
+  addWatchItems(
+    items: Array<{ company: string; source: string; externalId: string; title: string; url: string; publishedAt: string; summary: string; status: "new" | "old" }>,
+    seenAt: string,
+  ): WatchItem[] {
+    const insert = this.db.prepare(
+      "INSERT INTO watch_items (company, source, external_id, title, url, published_at, summary, seen_at, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (company, source, external_id) DO NOTHING RETURNING *",
+    );
+    const added: WatchItem[] = [];
+    for (const i of items) {
+      const row = insert.get(i.company, i.source, i.externalId, i.title, i.url, i.publishedAt, i.summary, seenAt, i.status) as WatchRow | undefined;
+      if (row) added.push(toWatchItem(row));
+    }
+    return added;
+  }
+
+  watchItemsWithStatus(status: WatchStatus): WatchItem[] {
+    return (this.db.prepare("SELECT * FROM watch_items WHERE status = ? ORDER BY published_at, id").all(status) as WatchRow[]).map(toWatchItem);
+  }
+
+  setWatchItemStatus(id: number, status: WatchStatus, reason?: string): void {
+    this.db.prepare("UPDATE watch_items SET status = ?, reason = COALESCE(?, reason) WHERE id = ?").run(status, reason ?? null, id);
+  }
+
+  /** Moves items from one status to another only if they're still in it; returns the ids that moved. Two checks can't both claim an item. */
+  claimWatchItems(ids: number[], from: WatchStatus, to: WatchStatus): number[] {
+    const claim = this.db.prepare("UPDATE watch_items SET status = ? WHERE id = ? AND status = ? RETURNING id");
+    return ids.filter((id) => claim.get(to, id, from) !== undefined);
+  }
+
+  /** Newest first, published at or after `since`, optionally for one company (case-insensitive). */
+  recentWatchItems(since: string, company?: string, limit = 30): WatchItem[] {
+    const rows = company
+      ? this.db.prepare("SELECT * FROM watch_items WHERE published_at >= ? AND company = ? COLLATE NOCASE ORDER BY published_at DESC LIMIT ?").all(since, company, limit)
+      : this.db.prepare("SELECT * FROM watch_items WHERE published_at >= ? ORDER BY published_at DESC LIMIT ?").all(since, limit);
+    return (rows as WatchRow[]).map(toWatchItem);
+  }
+
+  recordPurchase(p: Omit<Purchase, "id">): Purchase {
+    const row = this.db
+      .prepare("INSERT INTO purchases (approval_id, at, date, url, description, amount, network, pay_to, status, tx, error, result) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *")
+      .get(p.approvalId, p.at, p.date, p.url, p.description, p.amount, p.network, p.payTo, p.status, p.tx, p.error, p.result) as PurchaseRow;
+    return toPurchase(row);
+  }
+
+  /** Money committed on `date` (YYYY-MM-DD) in the token's smallest unit: everything except failed attempts. */
+  paidOn(date: string): bigint {
+    const rows = this.db.prepare("SELECT amount FROM purchases WHERE date = ? AND status != 'failed'").all(date) as Array<{ amount: string }>;
+    return rows.reduce((sum, r) => sum + BigInt(r.amount), 0n);
+  }
+
+  /**
+   * Reserves a purchase as pending if it fits under `cap` for its day, in one
+   * transaction, so two processes approving at once can't both pass the cap.
+   * Returns the reserved row, or null when it doesn't fit.
+   */
+  reservePurchase(p: Omit<Purchase, "id" | "status" | "tx" | "error" | "result">, cap: bigint): Purchase | null {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      if (this.paidOn(p.date) + BigInt(p.amount) > cap) {
+        this.db.exec("ROLLBACK");
+        return null;
+      }
+      const row = this.recordPurchase({ ...p, status: "pending", tx: null, error: null, result: null });
+      this.db.exec("COMMIT");
+      return row;
+    } catch (err) {
+      this.db.exec("ROLLBACK");
+      throw err;
+    }
+  }
+
+  finishPurchase(id: number, r: { status: Exclude<PurchaseStatus, "pending">; tx?: string | null; error?: string | null; result?: string | null }): Purchase {
+    const row = this.db
+      .prepare("UPDATE purchases SET status = ?, tx = ?, error = ?, result = ? WHERE id = ? RETURNING *")
+      .get(r.status, r.tx ?? null, r.error ?? null, r.result ?? null, id) as PurchaseRow;
+    return toPurchase(row);
+  }
+
+  recentPurchases(limit: number): Purchase[] {
+    return (this.db.prepare("SELECT * FROM purchases ORDER BY id DESC LIMIT ?").all(limit) as PurchaseRow[]).map(toPurchase);
+  }
+
+  pendingApprovals(now: string): Approval[] {
+    return (this.db.prepare("SELECT * FROM approvals WHERE status = 'pending' AND expires_at > ? ORDER BY id").all(now) as ApprovalRow[]).map(toApproval);
   }
 
   markAlertDelivered(id: number): void {
