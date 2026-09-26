@@ -14,6 +14,8 @@ export type Config = {
   agent: Record<Tier, TierSettings> | { problem: string };
   /** USD the agent may spend over any 7 days (0 turns the cap off). */
   agentWeeklyCap: number;
+  /** The dearbyte-bridge MCP address (it contains a secret), or null when health data isn't set up. */
+  healthMcpUrl: string | null;
   /** The agent's persona, or what's wrong with DEARBYTE_PERSONA. */
   agentPersona: Persona | { problem: string };
   dbPath: string;
@@ -51,6 +53,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     agent: resolveTiers(merged),
     agentWeeklyCap: nonNegative(merged.DEARBYTE_WEEKLY_CAP, DEFAULT_WEEKLY_CAP),
     agentPersona: resolvePersona(merged.DEARBYTE_PERSONA),
+    healthMcpUrl: merged.HEALTH_MCP_URL?.trim() || null,
     dbPath: merged.COMPANION_DB || join(ROOT, "data/companion.sqlite"),
     timeZone: merged.COMPANION_TZ || Intl.DateTimeFormat().resolvedOptions().timeZone,
     historyMessages: Number(merged.COMPANION_HISTORY_MESSAGES || 40),
