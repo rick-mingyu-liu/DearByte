@@ -6,7 +6,8 @@
 import type { Baseline } from "./daily.ts";
 import type { Night } from "./summary.ts";
 
-export type Trigger = { kind: "short_sleep" | "high_resting_hr" | "low_hrv"; detail: string };
+/** `hard_event` comes from the calendar (calendar/rules.ts) and only joins a health trigger. */
+export type Trigger = { kind: "short_sleep" | "high_resting_hr" | "low_hrv" | "hard_event"; detail: string };
 
 /** Without a baseline yet, sleep is compared against this. */
 export const DEFAULT_SLEEP_MINUTES = 7 * 60;

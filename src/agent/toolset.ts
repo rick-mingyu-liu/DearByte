@@ -1,10 +1,12 @@
 // Which tools the agent gets, from what is set up: health tools when
 // HEALTH_MCP_URL is set, news when there's a watchlist, buying when there's a
-// wallet, memory tools always
+// wallet, the calendar when it can be read, memory tools always
 // (they report when memory is off).
 
 import { z } from "zod";
 import { localDate } from "../companion/time.ts";
+import type { CalendarSource } from "../calendar/mac.ts";
+import { calendarTools } from "../calendar/tools.ts";
 import { HealthMcpClient } from "../health/mcp-client.ts";
 import { healthTools } from "../health/tools.ts";
 import type { Store } from "../storage/store.ts";
@@ -42,6 +44,8 @@ export function agentToolset(o: {
   watchlist?: Watchlist | null;
   /** The wallet's tools, when a wallet is set up. */
   wallet?: WalletDeps | null;
+  /** The user's calendar, when it can be read. */
+  calendar?: CalendarSource | null;
 }): {
   tools: ToolRegistry;
   health: boolean;
@@ -51,6 +55,7 @@ export function agentToolset(o: {
   const tools = [...memoryTools(o.store, o.timeZone)];
   const bridge = o.healthMcpUrl ? new HealthMcpClient(o.healthMcpUrl) : null;
   if (bridge) tools.push(...healthTools(bridge, { timeZone: o.timeZone }));
+  if (o.calendar) tools.push(...calendarTools(o.calendar, { timeZone: o.timeZone }));
   if (o.watchlist) tools.push(...watchlistTools(o.store, o.watchlist));
   if (o.wallet) tools.push(...walletTools(o.wallet));
   return { tools: new ToolRegistry(tools), health: Boolean(bridge), bridge };

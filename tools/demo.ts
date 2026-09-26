@@ -6,7 +6,7 @@
 //   npm run demo -- --no-pause   don't wait for Enter between parts
 //
 // 1. Knows you: the morning brief from last night's sleep, heart rate and HRV against your own normal,
-//    then a question the agent answers with its health tools.
+//    and today's calendar, then a question the agent answers with its health and calendar tools.
 // 2. Watches for you: one watchlist check. The worker screens the news, and the brain writes the message.
 // 3. Spends for you: the agent proposes buying a recovery plan from the example seller. You approve
 //    (here, or with the button in Telegram), it pays, and you get a receipt.
@@ -33,6 +33,8 @@ import { runMorningBrief, type Notify } from "../src/agent/scheduled.ts";
 import { createTierModels } from "../src/agent/tiers.ts";
 import { ToolRegistry } from "../src/agent/tools.ts";
 import { memoryTools } from "../src/agent/toolset.ts";
+import { MacCalendar, type CalendarSource } from "../src/calendar/mac.ts";
+import { calendarTools } from "../src/calendar/tools.ts";
 import { HealthMcpClient } from "../src/health/mcp-client.ts";
 import { healthTools } from "../src/health/tools.ts";
 import { Store } from "../src/storage/store.ts";
@@ -201,16 +203,39 @@ function sampleBridge(now: Date): Pick<HealthMcpClient, "callTool"> {
 const healthLive = !allSample && Boolean(config.healthMcpUrl);
 const bridge = healthLive ? new HealthMcpClient(config.healthMcpUrl!) : sampleBridge(new Date());
 
+/** A made-up day: a standup at 10:00 and leg day in the evening (soon, if 19:00 has passed, but always still today). */
+function sampleCalendar(now: Date): CalendarSource {
+  const today = localDate(now, config.timeZone);
+  const soon = localDate(new Date(now.getTime() + 3_600_000), config.timeZone) === today ? now.getTime() + 3_600_000 : now.getTime() + 60_000;
+  const legDay = Math.max(atLocal(today, 19).getTime(), soon);
+  const events = [
+    { title: "Team standup", start: atLocal(today, 10), end: new Date(atLocal(today, 10).getTime() + 30 * 60_000), allDay: false },
+    { title: "Leg day at the gym", start: new Date(legDay), end: new Date(legDay + 75 * 60_000), allDay: false },
+  ];
+  return { events: async (from, to) => ({ status: "ok", events: events.filter((e) => e.end > from && e.start < to) }) };
+}
+
+/** Your calendar when DearByte may read it (npm run agent -- calendar), otherwise the sample day. */
+async function pickCalendar(): Promise<{ calendar: CalendarSource; live: boolean }> {
+  if (!allSample && config.calendar) {
+    const mac = new MacCalendar();
+    if ((await mac.access()) === "granted") return { calendar: mac, live: true };
+  }
+  return { calendar: sampleCalendar(new Date()), live: false };
+}
+const { calendar, live: calendarLive } = await pickCalendar();
+
 async function knowsYou(): Promise<void> {
-  const live = healthLive;
-  await scene(1, "Knows you", live ? "your Apple Watch, through dearbyte-bridge" : "SAMPLE health data (set HEALTH_MCP_URL for yours)");
-  const tools = new ToolRegistry([...memoryTools(memoryStore, config.timeZone), ...healthTools(bridge, { timeZone: config.timeZone })]);
+  const live = healthLive && calendarLive;
+  const sources = [healthLive ? "your Apple Watch" : "SAMPLE health data", calendarLive ? "your calendar" : "a SAMPLE calendar day"].join(" + ");
+  await scene(1, "Knows you", sources);
+  const tools = new ToolRegistry([...memoryTools(memoryStore, config.timeZone), ...healthTools(bridge, { timeZone: config.timeZone }), ...calendarTools(calendar, { timeZone: config.timeZone })]);
   console.log(dim("The morning brief: rules in code compare last night with your normal; the brain writes the words.\n"));
-  const brief = await runMorningBrief({ bridge, store, model: models.brain, tools, system, timeZone: config.timeZone, notify: notifier(!live), onEvent }, { force: true });
+  const brief = await runMorningBrief({ bridge, store, model: models.brain, tools, system, timeZone: config.timeZone, notify: notifier(!live), calendar, onEvent }, { force: true });
   if (!brief.sent) console.log(dim(`No brief: ${brief.reason}`));
   else if (brief.triggers.length) console.log(dim(`Rules that fired: ${brief.triggers.map((t) => t.detail).join("; ")}`));
   console.log();
-  await ask(tools, "I have leg day planned tonight. Should I still go?", "demo");
+  await ask(tools, calendarLive ? "Given how I slept, is there anything on my calendar today I should change?" : "Should I still do leg day tonight?", "demo");
 }
 
 // ---- 2. Watches for you ----
@@ -346,7 +371,7 @@ async function spendsForYou(): Promise<void> {
     },
   };
   const handlers: ApprovalHandlers = { purchase: purchaseHandler(deps) };
-  const tools = new ToolRegistry([...memoryTools(memoryStore, config.timeZone), ...healthTools(bridge, { timeZone: config.timeZone }), ...walletTools(deps)]);
+  const tools = new ToolRegistry([...memoryTools(memoryStore, config.timeZone), ...healthTools(bridge, { timeZone: config.timeZone }), ...calendarTools(calendar, { timeZone: config.timeZone }), ...walletTools(deps)]);
   await ask(tools, `Rough night and a long day ahead. Can you get me the recovery plan from ${SELLER}/recovery-plan?`, "demo");
   if (proposed === null) return console.log(dim("The agent didn't propose a purchase this time, so there's nothing to approve."));
   await answer(proposed, handlers);
