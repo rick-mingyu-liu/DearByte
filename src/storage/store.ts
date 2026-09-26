@@ -116,6 +116,28 @@ CREATE TABLE IF NOT EXISTS watch_items (
   UNIQUE (company, source, external_id)
 );
 CREATE INDEX IF NOT EXISTS watch_items_status ON watch_items (status);
+
+-- What the wallet paid for: one row per approved purchase, with the
+-- on-chain transaction as the receipt. amount is in the token's smallest
+-- unit (USDC has 6 decimals). status: pending (reserved, being paid), paid
+-- (a transaction came back), unconfirmed (a signed payment went out but no
+-- transaction came back: it may still be charged), failed (nothing signed
+-- went out). Everything but failed counts toward the daily limit.
+CREATE TABLE IF NOT EXISTS purchases (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  approval_id INTEGER NOT NULL UNIQUE,
+  at TEXT NOT NULL,
+  date TEXT NOT NULL,
+  url TEXT NOT NULL,
+  description TEXT NOT NULL,
+  amount TEXT NOT NULL,
+  network TEXT NOT NULL,
+  pay_to TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('pending', 'paid', 'unconfirmed', 'failed')),
+  tx TEXT,
+  error TEXT,
+  result TEXT
+);
 `;
 
 /**
@@ -250,6 +272,39 @@ const toWatchItem = (r: WatchRow): WatchItem => ({
   seenAt: r.seen_at,
   status: r.status,
   reason: r.reason,
+});
+
+export type PurchaseStatus = "pending" | "paid" | "unconfirmed" | "failed";
+export type Purchase = {
+  id: number;
+  approvalId: number;
+  at: string;
+  date: string;
+  url: string;
+  description: string;
+  amount: string;
+  network: string;
+  payTo: string;
+  status: PurchaseStatus;
+  tx: string | null;
+  error: string | null;
+  result: string | null;
+};
+type PurchaseRow = { id: number; approval_id: number; at: string; date: string; url: string; description: string; amount: string; network: string; pay_to: string; status: PurchaseStatus; tx: string | null; error: string | null; result: string | null };
+const toPurchase = (r: PurchaseRow): Purchase => ({
+  id: r.id,
+  approvalId: r.approval_id,
+  at: r.at,
+  date: r.date,
+  url: r.url,
+  description: r.description,
+  amount: r.amount,
+  network: r.network,
+  payTo: r.pay_to,
+  status: r.status,
+  tx: r.tx,
+  error: r.error,
+  result: r.result,
 });
 
 export type UpsertResult = "inserted" | "updated" | "unchanged" | "blocked";
@@ -573,6 +628,55 @@ export class Store {
       ? this.db.prepare("SELECT * FROM watch_items WHERE published_at >= ? AND company = ? COLLATE NOCASE ORDER BY published_at DESC LIMIT ?").all(since, company, limit)
       : this.db.prepare("SELECT * FROM watch_items WHERE published_at >= ? ORDER BY published_at DESC LIMIT ?").all(since, limit);
     return (rows as WatchRow[]).map(toWatchItem);
+  }
+
+  recordPurchase(p: Omit<Purchase, "id">): Purchase {
+    const row = this.db
+      .prepare("INSERT INTO purchases (approval_id, at, date, url, description, amount, network, pay_to, status, tx, error, result) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *")
+      .get(p.approvalId, p.at, p.date, p.url, p.description, p.amount, p.network, p.payTo, p.status, p.tx, p.error, p.result) as PurchaseRow;
+    return toPurchase(row);
+  }
+
+  /** Money committed on `date` (YYYY-MM-DD) in the token's smallest unit: everything except failed attempts. */
+  paidOn(date: string): bigint {
+    const rows = this.db.prepare("SELECT amount FROM purchases WHERE date = ? AND status != 'failed'").all(date) as Array<{ amount: string }>;
+    return rows.reduce((sum, r) => sum + BigInt(r.amount), 0n);
+  }
+
+  /**
+   * Reserves a purchase as pending if it fits under `cap` for its day, in one
+   * transaction, so two processes approving at once can't both pass the cap.
+   * Returns the reserved row, or null when it doesn't fit.
+   */
+  reservePurchase(p: Omit<Purchase, "id" | "status" | "tx" | "error" | "result">, cap: bigint): Purchase | null {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      if (this.paidOn(p.date) + BigInt(p.amount) > cap) {
+        this.db.exec("ROLLBACK");
+        return null;
+      }
+      const row = this.recordPurchase({ ...p, status: "pending", tx: null, error: null, result: null });
+      this.db.exec("COMMIT");
+      return row;
+    } catch (err) {
+      this.db.exec("ROLLBACK");
+      throw err;
+    }
+  }
+
+  finishPurchase(id: number, r: { status: Exclude<PurchaseStatus, "pending">; tx?: string | null; error?: string | null; result?: string | null }): Purchase {
+    const row = this.db
+      .prepare("UPDATE purchases SET status = ?, tx = ?, error = ?, result = ? WHERE id = ? RETURNING *")
+      .get(r.status, r.tx ?? null, r.error ?? null, r.result ?? null, id) as PurchaseRow;
+    return toPurchase(row);
+  }
+
+  recentPurchases(limit: number): Purchase[] {
+    return (this.db.prepare("SELECT * FROM purchases ORDER BY id DESC LIMIT ?").all(limit) as PurchaseRow[]).map(toPurchase);
+  }
+
+  pendingApprovals(now: string): Approval[] {
+    return (this.db.prepare("SELECT * FROM approvals WHERE status = 'pending' AND expires_at > ? ORDER BY id").all(now) as ApprovalRow[]).map(toApproval);
   }
 
   markAlertDelivered(id: number): void {
