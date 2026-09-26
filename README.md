@@ -116,7 +116,7 @@ All settings go in `.env`.
 | `DEARBYTE_BRAIN` | `deepseek:deepseek-flash` | The model for judgment calls: caution alerts, news analysis, anything about money. For demos: `anthropic:claude-opus-5-5` |
 | `DEARBYTE_BRAIN_EFFORT` | the model's default | `low` to `max`; set `high` for Claude Opus 5.5 |
 | `DEARBYTE_WORKER` | `deepseek:deepseek-flash` | The model for high-volume, easy-to-check work: filtering, summaries |
-| `DEARBYTE_PERSONA` | `default` | `default` (English DearByte) or `xiaobai` (Chinese) |
+| `DEARBYTE_PERSONA` | `default` | A persona pack in `personas/`: `default` (English DearByte), `xiaobai` (Chinese), or any other in [the index](personas/INDEX.md) |
 | `DEARBYTE_WEEKLY_CAP` | `5` | USD the agent may spend on model calls in any 7 days; `0` turns the cap off |
 | `HEALTH_MCP_URL` | — | Your dearbyte-bridge MCP address. It contains a secret, so treat it like a password |
 | `TELEGRAM_BOT_TOKEN` | — | Your bot's token from @BotFather. Secret: whoever has it controls the bot |
@@ -207,7 +207,9 @@ you ─ CLI / Telegram ─┐
 
 ## Personas
 
-`default` is DearByte in English: warm, a little cheeky, and never a partner. It gives US crisis resources (988, 911) if anyone is in danger. `xiaobai` is an opt-in Chinese persona with the tsundere 小拜 tone and China's crisis numbers. Both share the same rules: facts only from tools, missing data reported as unknown, and plain wording for anything involving money. The files are in `prompts/agent/`.
+`default` is DearByte in English: warm, a little cheeky, and never a partner. It gives US crisis resources (988, 911) if anyone is in danger. `xiaobai` is an opt-in Chinese persona with the tsundere 小拜 tone and China's crisis numbers. Both share the same rules: facts only from tools, missing data reported as unknown, and plain wording for anything involving money.
+
+Personas are packs, one folder each in `personas/` (a manifest, the persona and optional examples), and anyone can add one in a PR. A pack changes how DearByte talks, never what it may do: the rules always come after it and win, CI rejects a pack that tries to override them, and every merged pack is recorded in [personas/INDEX.md](personas/INDEX.md) with its authors and version. See [writing a persona](docs/personas.md).
 
 ## The Chinese companion: Xiaobai
 
@@ -224,6 +226,7 @@ The WeChat connection drives WeChat for Mac through macOS Accessibility. That is
 
 | Document | Contents |
 | --- | --- |
+| [Persona packs](docs/personas.md) | Choosing a persona, writing your own, and what CI checks |
 | [Agent guide](docs/agent-guide.md) | Setting up health, Telegram, the watchlist and the wallet; every command; a live test checklist |
 | [Operations guide](docs/guide.en.md) | 小拜 companion: commands, proactive messaging, WeChat, configuration, repository layout |
 | [How it works](docs/how-it-works.md) | The companion's reply pipeline, memory and storage |

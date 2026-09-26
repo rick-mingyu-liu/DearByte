@@ -1,0 +1,11 @@
+{
+  "id": "default",
+  "name": "DearByte",
+  "description": "Warm, direct and a little cheeky: a very organized friend, never a partner.",
+  "language": "en",
+  "authors": [{ "name": "Rick Liu", "github": "rick-mingyu-liu" }],
+  "license": "MIT",
+  "version": "1.0.0",
+  "added": "2026-09-26",
+  "crisis": { "region": "United States", "contacts": ["988", "911"] }
+}

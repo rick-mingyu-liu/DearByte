@@ -9,11 +9,16 @@ Thanks for helping with DearByte. It drives a real WeChat account on a real Mac,
 3. **Keep personal data out.** No real names, chat logs, screenshots of real chats, WeChat IDs, API keys, or anything from `data/` or `.env`. Use the placeholders 张三 and Alex.
 4. **Keep PRs small,** one change each. Say in the PR what you changed and how you tested it.
 
+## Adding a persona
+
+Persona packs are the easiest way to contribute: one folder in `personas/`, no code. [docs/personas.md](docs/personas.md) has the format, and `npm run personas -- check <id>` runs the same checks as CI. A maintainer reads every pack before merging.
+
 ## Changes that get a closer look
 
 - `native/` (the Swift helper that reads and types into WeChat) and `src/channels/`
 - `package.json`, `package-lock.json` and new dependencies
 - `.github/` (CI)
+- `prompts/agent/rules.en.md`, the rules every persona gets, and the persona checks in `src/agent/persona.ts`.
 - `prompts/safety.zh-CN.md` and the crisis check. These decide how 小拜 answers someone in trouble; please open an issue before changing them.
 
 ## How PRs are merged

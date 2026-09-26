@@ -24,7 +24,7 @@ import { dim } from "./console.ts";
 import { localDate } from "./companion/time.ts";
 import { runAgent, type LoopEvent, type LoopResult } from "./agent/loop.ts";
 import type { AgentMessage } from "./agent/model.ts";
-import { agentSystemPrompt, withCurrentTime } from "./agent/persona.ts";
+import { agentSystemPrompt, loadPack, withCurrentTime } from "./agent/persona.ts";
 import { createTierModels } from "./agent/tiers.ts";
 import { agentToolset } from "./agent/toolset.ts";
 import { WEEK_MS } from "./agent/usage.ts";
@@ -154,7 +154,8 @@ function status(): void {
   const weekSpend = store.agentSpendSince(new Date(Date.now() - WEEK_MS).toISOString());
   console.log(`Brain:   ${tiers.brain.provider}:${tiers.brain.model}${tiers.brain.effort ? ` (effort ${tiers.brain.effort})` : ""}`);
   console.log(`Worker:  ${tiers.worker.provider}:${tiers.worker.model}`);
-  console.log(`Persona: ${persona}`);
+  const pack = loadPack(ROOT, persona).manifest;
+  console.log(`Persona: ${persona} (${pack.name} ${pack.version}, ${pack.language}; npm run personas lists them all)`);
   console.log(`Tools:   ${tools.definitions().map((t) => t.name).join(", ")}`);
   console.log(`Health:  ${health ? "connected to dearbyte-bridge (HEALTH_MCP_URL)" : "not set up (add HEALTH_MCP_URL to .env; see dearbyte-bridge docs/SETUP.md)"}`);
   console.log(`Calendar: ${calendar ? "this Mac's calendars (npm run agent -- calendar to check access)" : "off (DEARBYTE_CALENDAR=off, or not on macOS)"}`);

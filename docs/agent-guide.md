@@ -134,5 +134,6 @@ src/telegram/           Bot API client (long polling) and the handler for button
 src/watchlist/          newsroom and SEC sources, screening, news tools
 src/wallet/             limits, x402 quote and payment, purchase proposals and receipts
 examples/seller/        example x402 seller (moving to its own repo)
-prompts/agent/          personas
+personas/               persona packs (docs/personas.md); INDEX.md is generated
+prompts/agent/          the rules every persona gets
 ```
