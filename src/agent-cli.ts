@@ -318,6 +318,11 @@ async function calendarCommand(): Promise<void> {
   if (access === "not_determined") {
     console.log("macOS will ask whether your terminal may access your calendars. DearByte reads titles and times only, skips invites you declined or haven't answered, and sends the titles it uses to your model provider (they can appear in its messages, including Telegram).");
     access = await calendar.requestAccess();
+    if (access === "not_determined") {
+      return console.log(
+        "No answer from macOS yet. If the dialog is still open (it can hide behind other windows), click Allow, then run this again. If no dialog appeared: System Settings → Privacy & Security → Calendars, turn on your terminal app.",
+      );
+    }
   }
   const now = new Date();
   const result = await calendar.events(now, new Date(now.getTime() + 48 * 3_600_000));

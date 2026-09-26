@@ -48,9 +48,18 @@ case "access":
         break
     }
     let done = DispatchSemaphore(value: 0)
-    store.requestFullAccessToEvents { _, _ in done.signal() }
+    var problem: String? = nil
+    store.requestFullAccessToEvents { _, error in
+        problem = error?.localizedDescription
+        done.signal()
+    }
     done.wait()
-    printJSON(["status": access()])
+    // The answer can come back before the user has clicked, while the dialog is still open: keep checking for a minute.
+    let deadline = Date().addingTimeInterval(60)
+    while access() == "not_determined" && Date() < deadline { Thread.sleep(forTimeInterval: 0.5) }
+    var out: [String: Any] = ["status": access()]
+    if let problem { out["message"] = problem }
+    printJSON(out)
 
 case "events":
     guard args.count == 4, let from = iso.date(from: args[2]), let to = iso.date(from: args[3]), from < to else {
