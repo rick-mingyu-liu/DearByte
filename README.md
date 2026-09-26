@@ -32,20 +32,20 @@ Most AI assistants run on someone else's servers, and none of them know how you 
 
 ## Status
 
-DearByte is early and built in the open. What works today and what's coming:
+DearByte is early and built in the open. All of Phase 1 is on `master` (248 offline tests). What works today and what's coming:
 
 | Part | Status |
 | --- | --- |
-| Agent core: tool loop, validated tools, Claude or DeepSeek as "brain" and "worker" tiers | **Works**, tested offline and with live DeepSeek runs; no real tools connected yet |
+| Agent core: tool loop, validated tools, Claude or DeepSeek as "brain" and "worker" tiers | **Works**, tested offline and with live DeepSeek runs |
 | Spending controls: per-run and weekly caps, a usage log of every model call | **Works** |
 | English persona, plus the opt-in Chinese Xiaobai pack | **Works** |
 | Chat companion in the terminal and in WeChat (Xiaobai, Chinese) with memory and proactive check-ins | **Works**, see [the companion](#the-chinese-companion-xiaobai) |
-| Apple Watch and Apple Health data, through [dearbyte-bridge](https://github.com/dearbyte-labs/dearbyte-bridge) | **Works** with the bridge's test data; the iPhone setup is next |
+| Apple Watch and Apple Health data, through [dearbyte-bridge](https://github.com/dearbyte-labs/dearbyte-bridge) | **Works** with the bridge's test data; a live test with a real iPhone is next |
 | Calendar awareness (Apple Calendar, via the same iPhone app) | Planned |
 | Caution alerts and a morning brief, judged against your own normal sleep, resting heart rate and HRV | **Works**; the calendar part waits for calendar awareness |
-| Telegram for alerts, a 👍/👎 on every alert, and Approve/Reject buttons | **Works** |
-| Company watchlist: official newsroom feeds and SEC filings, screened against what you care about | **Works** |
-| Testnet wallet: the agent proposes a paid service, you approve, it pays within a cap, and you get a receipt | **Works** with x402 on Base Sepolia; a live on-chain payment needs test USDC from the faucet |
+| Telegram for alerts, a 👍/👎 on every alert, and Approve/Reject buttons | **Works** in tests; a live test with a real bot is next |
+| Company watchlist: official newsroom feeds and SEC filings, screened against what you care about | **Works**, tested live on real feeds |
+| Testnet wallet: the agent proposes a paid service, you approve, it pays within a cap, and you get a receipt | **Works** with x402 on Base Sepolia, tested live against the example seller in dev mode; an on-chain payment needs test USDC from the faucet |
 
 ## Roadmap
 
@@ -91,7 +91,17 @@ npm run agent:smoke
 npm run agent:usage
 ```
 
-`agent:smoke` asks "How did I sleep, and should I still do leg day tonight?" against two sample tools and prints each step, the tool calls and the answer. `agent:usage` shows what that cost. The command-line agent on your real data (`npm run agent`) comes with the Apple Watch integration.
+`agent:smoke` asks "How did I sleep, and should I still do leg day tonight?" against two sample tools and prints each step, the tool calls and the answer. `agent:usage` shows what that cost.
+
+Then use the agent itself (`npm run agent` lists every command):
+
+```bash
+npm run agent -- status     # which models, tools and limits are active
+npm run agent -- chat       # talk to it; tools appear as you set them up
+npm run agent -- watch      # always on: morning brief, caution alerts, news
+```
+
+The [agent guide](docs/agent-guide.md) walks through setting up health, Telegram, the watchlist and the wallet in order, and has a checklist for testing each one live.
 
 ## Configuration
 
@@ -173,7 +183,7 @@ you ─ CLI / Telegram ─┐
                       │           └─ usage log + weekly cap
                       ▼
             validated tools ─┬─ health and sleep (dearbyte-bridge, MCP)
-                             ├─ calendar
+                             ├─ calendar (Phase 2)
                              ├─ memory
                              ├─ company watchlist
                              └─ propose_purchase ──► your approval ──► payment code
@@ -186,8 +196,9 @@ you ─ CLI / Telegram ─┐
 
 ## Data and privacy
 
-- **Your data stays on your machine** in the Git-ignored `data/` folder: memory, usage log, and chat history.
-- **What leaves:** the context of each request goes to the model provider you choose (DeepSeek or Anthropic). Health data goes from your phone to *your own* Cloudflare Worker (dearbyte-bridge), and from there only to clients you give its secret MCP address to, such as DearByte.
+- **Your data stays on your machine** in the Git-ignored `data/` folder: memory, chat history, the usage log, daily health summaries, alerts and your ratings, news items, approvals and purchase receipts.
+- **What leaves:** the context of each request goes to the model provider you choose (DeepSeek or Anthropic). Health data goes from your phone to *your own* Cloudflare Worker (dearbyte-bridge), and from there only to clients you give its secret MCP address to, such as DearByte. Briefs, alerts and approval requests you get in Telegram go through Telegram's servers. The watchlist only reads public newsroom feeds and SEC filings.
+- **The wallet key** stays in `.env` and is only used to sign payments you approved; it's never sent anywhere or printed.
 - **Memory is inspectable and deletable,** and every stored fact quotes your own words as evidence.
 - **Health:** DearByte uses summaries (last night's sleep, your 7-day average), not raw sample history. It isn't a medical device.
 
@@ -210,7 +221,8 @@ The WeChat connection drives WeChat for Mac through macOS Accessibility. That is
 
 | Document | Contents |
 | --- | --- |
-| [Operations guide](docs/guide.en.md) | Companion commands, proactive messaging, alerts, configuration, repository layout |
+| [Agent guide](docs/agent-guide.md) | Setting up health, Telegram, the watchlist and the wallet; every command; a live test checklist |
+| [Operations guide](docs/guide.en.md) | 小拜 companion: commands, proactive messaging, WeChat, configuration, repository layout |
 | [How it works](docs/how-it-works.md) | The companion's reply pipeline, memory and storage |
 | [Roadmap](#roadmap) | What's next: the first demo, daily use, then hosting and the marketplace |
 | [中文说明](README.zh-CN.md) | 小拜的中文介绍和快速开始 |
