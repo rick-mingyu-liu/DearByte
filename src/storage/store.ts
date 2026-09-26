@@ -55,6 +55,31 @@ CREATE TABLE IF NOT EXISTS agent_usage (
   ms INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS agent_usage_at ON agent_usage (at);
+
+-- One row per day (the day you woke up): what DearByte saw, so it can learn
+-- your normal beyond the bridge's short retention. NULL = not recorded.
+CREATE TABLE IF NOT EXISTS health_daily (
+  date TEXT PRIMARY KEY,
+  asleep_minutes INTEGER,
+  deep_minutes INTEGER,
+  rem_minutes INTEGER,
+  resting_hr REAL,
+  hrv_ms REAL,
+  updated_at TEXT NOT NULL
+);
+
+-- Everything the agent sent on its own: morning briefs and caution alerts.
+-- kind + date keep one brief a day and each caution once a day.
+CREATE TABLE IF NOT EXISTS agent_alerts (
+  id INTEGER PRIMARY KEY,
+  at TEXT NOT NULL,
+  date TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  triggers TEXT NOT NULL,
+  text TEXT NOT NULL,
+  delivered INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS agent_alerts_date ON agent_alerts (date);
 `;
 
 /**
@@ -125,6 +150,17 @@ export type AgentUsageTotal = {
   cost: number;
   unpriced: number;
 };
+
+export type HealthDay = {
+  date: string;
+  asleepMinutes: number | null;
+  deepMinutes: number | null;
+  remMinutes: number | null;
+  restingHr: number | null;
+  hrvMs: number | null;
+};
+
+export type AgentAlert = { id: number; at: string; date: string; kind: string; triggers: string[]; text: string; delivered: boolean };
 
 export type UpsertResult = "inserted" | "updated" | "unchanged" | "blocked";
 
@@ -320,6 +356,56 @@ export class Store {
          FROM agent_usage WHERE at >= ? GROUP BY purpose, tier, model ORDER BY cost DESC`,
       )
       .all(since) as AgentUsageTotal[];
+  }
+
+  /** Records what's known for a day; a NULL never overwrites a known value. */
+  upsertHealthDay(d: HealthDay, now = new Date().toISOString()): void {
+    this.db
+      .prepare(
+        `INSERT INTO health_daily (date, asleep_minutes, deep_minutes, rem_minutes, resting_hr, hrv_ms, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(date) DO UPDATE SET
+           asleep_minutes = COALESCE(excluded.asleep_minutes, asleep_minutes),
+           deep_minutes = COALESCE(excluded.deep_minutes, deep_minutes),
+           rem_minutes = COALESCE(excluded.rem_minutes, rem_minutes),
+           resting_hr = COALESCE(excluded.resting_hr, resting_hr),
+           hrv_ms = COALESCE(excluded.hrv_ms, hrv_ms),
+           updated_at = excluded.updated_at`,
+      )
+      .run(d.date, d.asleepMinutes, d.deepMinutes, d.remMinutes, d.restingHr, d.hrvMs, now);
+  }
+
+  /** Days from `from` to `to` inclusive (YYYY-MM-DD), oldest first. */
+  healthDays(from: string, to: string): HealthDay[] {
+    const rows = this.db
+      .prepare("SELECT date, asleep_minutes, deep_minutes, rem_minutes, resting_hr, hrv_ms FROM health_daily WHERE date >= ? AND date <= ? ORDER BY date")
+      .all(from, to) as Array<{ date: string; asleep_minutes: number | null; deep_minutes: number | null; rem_minutes: number | null; resting_hr: number | null; hrv_ms: number | null }>;
+    return rows.map((r) => ({ date: r.date, asleepMinutes: r.asleep_minutes, deepMinutes: r.deep_minutes, remMinutes: r.rem_minutes, restingHr: r.resting_hr, hrvMs: r.hrv_ms }));
+  }
+
+  recordAlert(a: { at: string; date: string; kind: string; triggers: string[]; text: string; delivered: boolean }): number {
+    const row = this.db
+      .prepare("INSERT INTO agent_alerts (at, date, kind, triggers, text, delivered) VALUES (?, ?, ?, ?, ?, ?) RETURNING id")
+      .get(a.at, a.date, a.kind, JSON.stringify(a.triggers), a.text, a.delivered ? 1 : 0) as { id: number };
+    return row.id;
+  }
+
+  alertsOn(date: string): AgentAlert[] {
+    const rows = this.db.prepare("SELECT id, at, date, kind, triggers, text, delivered FROM agent_alerts WHERE date = ? ORDER BY id").all(date) as Array<
+      Omit<AgentAlert, "triggers" | "delivered"> & { triggers: string; delivered: number }
+    >;
+    return rows.map((r) => ({ ...r, triggers: JSON.parse(r.triggers), delivered: r.delivered === 1 }));
+  }
+
+  recentAlerts(limit: number): AgentAlert[] {
+    const rows = this.db.prepare("SELECT id, at, date, kind, triggers, text, delivered FROM agent_alerts ORDER BY id DESC LIMIT ?").all(limit) as Array<
+      Omit<AgentAlert, "triggers" | "delivered"> & { triggers: string; delivered: number }
+    >;
+    return rows.map((r) => ({ ...r, triggers: JSON.parse(r.triggers), delivered: r.delivered === 1 }));
+  }
+
+  markAlertDelivered(id: number): void {
+    this.db.prepare("UPDATE agent_alerts SET delivered = 1 WHERE id = ?").run(id);
   }
 
   memoryEnabled(): boolean {
