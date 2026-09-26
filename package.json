@@ -13,7 +13,8 @@
     "bakeoff": "tsx tools/bakeoff.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "agent:smoke": "tsx --env-file-if-exists=.env tools/agent-smoke.ts"
+    "agent:smoke": "tsx --env-file-if-exists=.env tools/agent-smoke.ts",
+    "agent:usage": "tsx tools/agent-usage.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "0.128.0",

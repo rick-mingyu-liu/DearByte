@@ -24,6 +24,8 @@ export type AgentRequest = {
   tools: AgentTool[];
   maxTokens?: number;
   signal?: AbortSignal;
+  /** What the call is for ("chat", "morning_brief", ...), for the usage log. */
+  purpose?: string;
 };
 
 export type AgentStep = {

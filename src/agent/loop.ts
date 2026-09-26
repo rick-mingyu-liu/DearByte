@@ -5,12 +5,13 @@
 // It stops early, without running that turn's tools, when:
 //   - the model refused (a refusal can cut a tool call off mid-input)
 //   - the output hit max_tokens during a tool call (the input may be truncated)
-//   - the step or spending limit is reached
+//   - the step or spending limit is reached, or the weekly cap (see usage.ts)
 
 import type { AgentBlock, AgentMessage, AgentModel, AgentStopReason } from "./model.ts";
 import type { ToolRegistry, ToolResult } from "./tools.ts";
+import { WeeklyCapReached } from "./usage.ts";
 
-export type LoopStop = "done" | "refusal" | "truncated" | "max_steps" | "budget" | "other";
+export type LoopStop = "done" | "refusal" | "truncated" | "max_steps" | "budget" | "weekly_cap" | "other";
 
 export type LoopEvent =
   | { type: "step"; n: number; model: string; stopReason: AgentStopReason | null; ms: number; cost: number | null }
@@ -38,6 +39,8 @@ export async function runAgent(o: {
   messages: AgentMessage[];
   maxSteps?: number;
   maxCost?: number;
+  /** Recorded in the usage log with every call of this run. */
+  purpose?: string;
   signal?: AbortSignal;
   onEvent?: (e: LoopEvent) => void;
 }): Promise<LoopResult> {
@@ -49,7 +52,13 @@ export async function runAgent(o: {
 
   for (let n = 1; n <= maxSteps; n++) {
     if (cost >= maxCost) return { stop: "budget", text: "", messages, steps: n - 1, cost };
-    const step = await o.model.step({ system: o.system, messages, tools, signal: o.signal });
+    let step;
+    try {
+      step = await o.model.step({ system: o.system, messages, tools, signal: o.signal, purpose: o.purpose });
+    } catch (err) {
+      if (err instanceof WeeklyCapReached) return { stop: "weekly_cap", text: "", messages, steps: n - 1, cost };
+      throw err;
+    }
     const stepCost = o.model.cost(step.usage);
     cost += stepCost ?? 0;
     o.onEvent?.({ type: "step", n, model: step.model, stopReason: step.stopReason, ms: step.ms, cost: stepCost });

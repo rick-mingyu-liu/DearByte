@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { resolveTiers, type Tier, type TierSettings } from "./agent/tiers.ts";
+import { DEFAULT_WEEKLY_CAP } from "./agent/usage.ts";
 import { resolveModel, type ModelSettings } from "./model/providers.ts";
 
 export const ROOT = new URL("..", import.meta.url).pathname;
@@ -10,6 +11,8 @@ export type Config = {
   model: ModelSettings | { problem: string };
   /** The agent's brain and worker models; or what's missing from .env. */
   agent: Record<Tier, TierSettings> | { problem: string };
+  /** USD the agent may spend over any 7 days (0 turns the cap off). */
+  agentWeeklyCap: number;
   dbPath: string;
   timeZone: string;
   historyMessages: number;
@@ -43,6 +46,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   return {
     model: resolveModel(merged),
     agent: resolveTiers(merged),
+    agentWeeklyCap: nonNegative(merged.DEARBYTE_WEEKLY_CAP, DEFAULT_WEEKLY_CAP),
     dbPath: merged.COMPANION_DB || join(ROOT, "data/companion.sqlite"),
     timeZone: merged.COMPANION_TZ || Intl.DateTimeFormat().resolvedOptions().timeZone,
     historyMessages: Number(merged.COMPANION_HISTORY_MESSAGES || 40),

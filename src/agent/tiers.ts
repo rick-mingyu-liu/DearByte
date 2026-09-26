@@ -9,6 +9,7 @@
 //   DEARBYTE_WORKER=deepseek:deepseek-flash
 
 import { AGENT_PROVIDERS, agentPrices, MessagesAgentModel, type AgentModel, type AgentProvider, type Effort } from "./model.ts";
+import { MeteredAgentModel, type UsageStore } from "./usage.ts";
 
 export const TIERS = ["brain", "worker"] as const;
 export type Tier = (typeof TIERS)[number];
@@ -41,6 +42,11 @@ export function resolveTiers(env: Record<string, string | undefined>): Record<Ti
   return out;
 }
 
-export function createTierModels(settings: Record<Tier, TierSettings>): Record<Tier, AgentModel> {
-  return { brain: new MessagesAgentModel(settings.brain), worker: new MessagesAgentModel(settings.worker) };
+/** Both tier models; with `meter`, every call is logged and the weekly cap applies. */
+export function createTierModels(settings: Record<Tier, TierSettings>, meter?: { store: UsageStore; weeklyCap: number }): Record<Tier, AgentModel> {
+  const make = (tier: Tier): AgentModel => {
+    const model = new MessagesAgentModel(settings[tier]);
+    return meter ? new MeteredAgentModel(model, { tier, ...meter }) : model;
+  };
+  return { brain: make("brain"), worker: make("worker") };
 }

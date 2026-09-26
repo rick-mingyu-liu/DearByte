@@ -1,7 +1,7 @@
 // A real run of the agent loop on one tier, with two sample tools that return
 // made-up data. Checks the key, the request shape, tool calls, and passing
 // thinking blocks back across steps (DeepSeek answers 400 if that's wrong).
-// Costs well under a cent on DeepSeek.
+// Costs well under a cent on DeepSeek, and is recorded in the usage log.
 //
 //   npm run agent:smoke            # the worker tier (DeepSeek by default)
 //   npm run agent:smoke -- brain   # the brain tier (DEARBYTE_BRAIN in .env)
@@ -12,6 +12,7 @@ import { loadConfig } from "../src/config.ts";
 import { runAgent } from "../src/agent/loop.ts";
 import { createTierModels, TIERS, type Tier } from "../src/agent/tiers.ts";
 import { defineTool, ToolRegistry } from "../src/agent/tools.ts";
+import { Store } from "../src/storage/store.ts";
 
 const tier = (process.argv[2] ?? "worker") as Tier;
 if (!TIERS.includes(tier)) throw new Error(`tier should be one of ${TIERS.join(", ")}`);
@@ -20,7 +21,9 @@ if ("problem" in config.agent) {
   console.error(config.agent.problem);
   process.exit(1);
 }
-const model = createTierModels(config.agent)[tier];
+// Logged like any other run, and stopped by the weekly cap like any other run.
+const store = Store.open(config.dbPath);
+const model = createTierModels(config.agent, { store, weeklyCap: config.agentWeeklyCap })[tier];
 
 // Sample data only: nothing here is real.
 const tools = new ToolRegistry([
@@ -44,6 +47,7 @@ try {
     tools,
     system: "You are DearByte's agent. Use tools to check facts before answering. Be brief.",
     messages: [{ role: "user", content: "How did I sleep, and should I still do leg day tonight?" }],
+    purpose: "smoke",
     onEvent: (e) =>
       console.log(
         e.type === "step"
@@ -58,4 +62,6 @@ try {
   else if (err instanceof Anthropic.APIError) console.error(`API error ${err.status}: ${err.message}`);
   else console.error((err as Error).message);
   process.exitCode = 1;
+} finally {
+  store.close();
 }
