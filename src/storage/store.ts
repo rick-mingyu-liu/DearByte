@@ -97,6 +97,25 @@ CREATE TABLE IF NOT EXISTS approvals (
   decided_at TEXT,
   decided_via TEXT
 );
+
+-- Company news from official sources. (company, source, external_id) dedupes across
+-- checks. status: new (not screened yet), old (stale), relevant / skipped
+-- (the screen's verdict, with its reason), sending (claimed by one check), sent.
+CREATE TABLE IF NOT EXISTS watch_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  company TEXT NOT NULL,
+  source TEXT NOT NULL,
+  external_id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  url TEXT NOT NULL,
+  published_at TEXT NOT NULL,
+  summary TEXT NOT NULL,
+  seen_at TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('new', 'old', 'relevant', 'skipped', 'sending', 'sent')),
+  reason TEXT,
+  UNIQUE (company, source, external_id)
+);
+CREATE INDEX IF NOT EXISTS watch_items_status ON watch_items (status);
 `;
 
 /**
@@ -202,6 +221,35 @@ const toApproval = (r: ApprovalRow): Approval => ({
   status: r.status,
   decidedAt: r.decided_at,
   decidedVia: r.decided_via,
+});
+
+export type WatchStatus = "new" | "old" | "relevant" | "skipped" | "sending" | "sent";
+export type WatchItem = {
+  id: number;
+  company: string;
+  source: string;
+  externalId: string;
+  title: string;
+  url: string;
+  publishedAt: string;
+  summary: string;
+  seenAt: string;
+  status: WatchStatus;
+  reason: string | null;
+};
+type WatchRow = { id: number; company: string; source: string; external_id: string; title: string; url: string; published_at: string; summary: string; seen_at: string; status: WatchStatus; reason: string | null };
+const toWatchItem = (r: WatchRow): WatchItem => ({
+  id: r.id,
+  company: r.company,
+  source: r.source,
+  externalId: r.external_id,
+  title: r.title,
+  url: r.url,
+  publishedAt: r.published_at,
+  summary: r.summary,
+  seenAt: r.seen_at,
+  status: r.status,
+  reason: r.reason,
 });
 
 export type UpsertResult = "inserted" | "updated" | "unchanged" | "blocked";
@@ -487,6 +535,44 @@ export class Store {
 
   recentApprovals(limit: number): Approval[] {
     return (this.db.prepare("SELECT * FROM approvals ORDER BY id DESC LIMIT ?").all(limit) as ApprovalRow[]).map(toApproval);
+  }
+
+  /** Adds the items not seen before, each with its starting status; returns only those added. */
+  addWatchItems(
+    items: Array<{ company: string; source: string; externalId: string; title: string; url: string; publishedAt: string; summary: string; status: "new" | "old" }>,
+    seenAt: string,
+  ): WatchItem[] {
+    const insert = this.db.prepare(
+      "INSERT INTO watch_items (company, source, external_id, title, url, published_at, summary, seen_at, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (company, source, external_id) DO NOTHING RETURNING *",
+    );
+    const added: WatchItem[] = [];
+    for (const i of items) {
+      const row = insert.get(i.company, i.source, i.externalId, i.title, i.url, i.publishedAt, i.summary, seenAt, i.status) as WatchRow | undefined;
+      if (row) added.push(toWatchItem(row));
+    }
+    return added;
+  }
+
+  watchItemsWithStatus(status: WatchStatus): WatchItem[] {
+    return (this.db.prepare("SELECT * FROM watch_items WHERE status = ? ORDER BY published_at, id").all(status) as WatchRow[]).map(toWatchItem);
+  }
+
+  setWatchItemStatus(id: number, status: WatchStatus, reason?: string): void {
+    this.db.prepare("UPDATE watch_items SET status = ?, reason = COALESCE(?, reason) WHERE id = ?").run(status, reason ?? null, id);
+  }
+
+  /** Moves items from one status to another only if they're still in it; returns the ids that moved. Two checks can't both claim an item. */
+  claimWatchItems(ids: number[], from: WatchStatus, to: WatchStatus): number[] {
+    const claim = this.db.prepare("UPDATE watch_items SET status = ? WHERE id = ? AND status = ? RETURNING id");
+    return ids.filter((id) => claim.get(to, id, from) !== undefined);
+  }
+
+  /** Newest first, published at or after `since`, optionally for one company (case-insensitive). */
+  recentWatchItems(since: string, company?: string, limit = 30): WatchItem[] {
+    const rows = company
+      ? this.db.prepare("SELECT * FROM watch_items WHERE published_at >= ? AND company = ? COLLATE NOCASE ORDER BY published_at DESC LIMIT ?").all(since, company, limit)
+      : this.db.prepare("SELECT * FROM watch_items WHERE published_at >= ? ORDER BY published_at DESC LIMIT ?").all(since, limit);
+    return (rows as WatchRow[]).map(toWatchItem);
   }
 
   markAlertDelivered(id: number): void {

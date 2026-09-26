@@ -1,11 +1,14 @@
 // Which tools the agent gets, from what is set up: health tools when
-// HEALTH_MCP_URL is set, memory tools always (they report when memory is off).
+// HEALTH_MCP_URL is set, news when there's a watchlist, memory tools always
+// (they report when memory is off).
 
 import { z } from "zod";
 import { localDate } from "../companion/time.ts";
 import { HealthMcpClient } from "../health/mcp-client.ts";
 import { healthTools } from "../health/tools.ts";
 import type { Store } from "../storage/store.ts";
+import type { Watchlist } from "../watchlist/config.ts";
+import { watchlistTools } from "../watchlist/tools.ts";
 import { defineTool, ToolRegistry, type Tool } from "./tools.ts";
 
 export function memoryTools(store: Pick<Store, "memoryEnabled" | "activeFacts">, timeZone: string): Tool[] {
@@ -29,7 +32,12 @@ export function memoryTools(store: Pick<Store, "memoryEnabled" | "activeFacts">,
   ];
 }
 
-export function agentToolset(o: { store: Pick<Store, "memoryEnabled" | "activeFacts">; timeZone: string; healthMcpUrl: string | null }): {
+export function agentToolset(o: {
+  store: Pick<Store, "memoryEnabled" | "activeFacts" | "recentWatchItems">;
+  timeZone: string;
+  healthMcpUrl: string | null;
+  watchlist?: Watchlist | null;
+}): {
   tools: ToolRegistry;
   health: boolean;
   /** The bridge client, when health is set up. */
@@ -38,5 +46,6 @@ export function agentToolset(o: { store: Pick<Store, "memoryEnabled" | "activeFa
   const tools = [...memoryTools(o.store, o.timeZone)];
   const bridge = o.healthMcpUrl ? new HealthMcpClient(o.healthMcpUrl) : null;
   if (bridge) tools.push(...healthTools(bridge, { timeZone: o.timeZone }));
+  if (o.watchlist) tools.push(...watchlistTools(o.store, o.watchlist));
   return { tools: new ToolRegistry(tools), health: Boolean(bridge), bridge };
 }

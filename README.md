@@ -44,7 +44,7 @@ DearByte is early and built in the open. What works today and what's coming:
 | Calendar awareness (Apple Calendar, via the same iPhone app) | Planned |
 | Caution alerts and a morning brief, judged against your own normal sleep, resting heart rate and HRV | **Works**; the calendar part waits for calendar awareness |
 | Telegram for alerts, a 👍/👎 on every alert, and Approve/Reject buttons | **Works** |
-| Company watchlist: official newsroom feeds and SEC filings | Planned |
+| Company watchlist: official newsroom feeds and SEC filings, screened against what you care about | **Works** |
 | Testnet wallet: the agent proposes a paid service, you approve, it pays within a cap, and you get a receipt | Planned |
 
 ## Roadmap
@@ -55,7 +55,7 @@ DearByte is early and built in the open. What works today and what's coming:
 - [x] Daily health snapshots, so DearByte learns your normal sleep, resting heart rate and HRV
 - [x] Caution alerts and a morning brief, with quiet hours and a daily limit (calendar comes in Phase 2)
 - [x] Telegram for alerts, and Approve/Reject buttons
-- [ ] Company watchlist: official newsroom feeds and SEC filings, with relevance filtered against what you care about
+- [x] Company watchlist: official newsroom feeds and SEC filings, with relevance filtered against what you care about
 - [ ] Testnet wallet demo: the agent proposes a paid service, you approve, it pays in test USDC within a cap, and you get a receipt
 
 **Phase 2: daily use, measured**
@@ -108,9 +108,26 @@ All settings go in `.env`.
 | `DEARBYTE_WEEKLY_CAP` | `5` | USD the agent may spend on model calls in any 7 days; `0` turns the cap off |
 | `HEALTH_MCP_URL` | — | Your dearbyte-bridge MCP address. It contains a secret, so treat it like a password |
 | `TELEGRAM_BOT_TOKEN` | — | Your bot's token from @BotFather. Secret: whoever has it controls the bot |
+| `SEC_CONTACT_EMAIL` | — | SEC asks automated clients for a contact email; without it the watchlist reads newsrooms only |
+| `DEARBYTE_WATCHLIST` | `watchlist.json` | Where your watchlist is |
 | `TELEGRAM_CHAT_ID` | — | Your chat with the bot; `npm run agent -- telegram` finds it. Only this chat can use the buttons |
 
 A model without a known price is refused, so the spending caps always work.
+
+### Company watchlist
+
+Copy `watchlist.example.json` to `watchlist.json` (ignored by Git) and edit it. `interests` says, in your words, what's worth a message; each company has its newsroom feeds and, optionally, its SEC number (`cik`).
+
+```bash
+npm run agent -- news    # check once; `watch` checks every hour
+```
+
+Only official sources are read: each company's newsroom feed and its SEC filings (8-K, 10-Q, 10-K and similar; not insider trades). Each check:
+1. Stores what's new, deduped by source id. Anything already 2 days old when first seen is recorded but never screened.
+2. The worker model screens new items against your `interests` and records a verdict and a reason for each, through a validated tool call.
+3. The brain writes one short message about what passed. The links are appended by code from the stored items, not written by the model.
+
+News follows the same quiet hours as health, with at most 3 news messages a day. The agent can also answer "anything new on Meta?" from what was collected (`get_company_news`).
 
 ### Telegram
 
