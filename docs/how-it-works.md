@@ -239,4 +239,4 @@ Commands while running: `/pause`, `/resume`, `/proactive on|off`, `/memory`, `/m
 | Safety is a model, not a person | The check can miss things, and 小拜 can't call anyone. It gives hotline numbers. | No. It's a companion, not a service. |
 | Not sellable as is | Selling needs an official route (a mini program, an app, or iLink) and 生成式AI备案 registration. | Yes, but it's a different build |
 
-**What's next** (see [plan.md](plan.md)): film the video (see [film/shot-list.md](film/shot-list.md)). After that, memory per contact, memory search, and a product route only if the video takes off.
+**What's next:** see the [roadmap](../README.md#roadmap).
