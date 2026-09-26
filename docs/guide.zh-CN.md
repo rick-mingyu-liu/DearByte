@@ -1,4 +1,4 @@
-[返回首页](../README.md) · [English operations guide](guide.en.md)
+[返回首页](../README.zh-CN.md) · [English operations guide](guide.en.md)
 
 # DearByte · 小拜使用指南
 
@@ -6,7 +6,7 @@
 
 ## 终端聊天
 
-需要 Node.js 26+（在项目目录里 `nvm use` 会按 `.nvmrc` 切到 26）。安装与密钥配置见[快速开始](../README.md#快速开始)。
+需要 Node.js 26+（在项目目录里 `nvm use` 会按 `.nvmrc` 切到 26）。安装与密钥配置见[快速开始](../README.zh-CN.md#快速开始)。
 
 ```bash
 npm run companion
