@@ -11,6 +11,7 @@
 //   npm run agent -- watch             keep running: brief at 07:30, checks every 15 min
 //   npm run agent -- alerts            what DearByte sent on its own lately
 //   npm run agent -- telegram          set up Telegram, or test it with a sample approval
+//   npm run agent -- calendar          allow calendar access, and list the next 48 hours
 //   npm run agent -- news              check the company watchlist once
 //   npm run agent -- wallet [new]      the testnet wallet: address, balance, limits
 //   npm run agent -- approvals         requests waiting for your yes
@@ -42,6 +43,8 @@ import { baseSepolia } from "viem/chains";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { EXPLORER_TX, formatUsd, RPC_URL, USDC } from "./wallet/config.ts";
 import { purchaseHandler, type WalletDeps } from "./wallet/purchase.ts";
+import { MacCalendar } from "./calendar/mac.ts";
+import { clock } from "./calendar/rules.ts";
 
 const USAGE = `Usage:
   npm run agent -- ask "question"   answer one question
@@ -52,6 +55,7 @@ const USAGE = `Usage:
   npm run agent -- watch            keep running: brief at 07:30, caution checks every 15 min
   npm run agent -- alerts           recent briefs and alerts
   npm run agent -- telegram         set up Telegram, or test it
+  npm run agent -- calendar         allow calendar access, list the next 48 hours
   npm run agent -- news             check the company watchlist now
   npm run agent -- wallet [new]     the testnet wallet (new: create one)
   npm run agent -- approvals        requests waiting for your yes
@@ -59,7 +63,7 @@ const USAGE = `Usage:
 
 const config = loadConfig();
 const [command, ...rest] = process.argv.slice(2);
-if (!["ask", "chat", "status", "brief", "check", "watch", "alerts", "telegram", "news", "wallet", "approvals", "approve", "reject"].includes(command ?? "")) {
+if (!["ask", "chat", "status", "brief", "check", "watch", "alerts", "telegram", "calendar", "news", "wallet", "approvals", "approve", "reject"].includes(command ?? "")) {
   console.log(USAGE);
   process.exit(command ? 1 : 0);
 }
@@ -88,7 +92,9 @@ const wallet: WalletDeps | null = config.wallet
       announce: (a) => console.log(`\n── Approval #${a.id} ──\n${approvalText(a)}\nTo answer: /approve ${a.id} or /reject ${a.id} in chat, or npm run agent -- approve ${a.id}\n`),
     }
   : null;
-const { tools, health, bridge } = agentToolset({ store, timeZone: config.timeZone, healthMcpUrl: config.healthMcpUrl, watchlist, wallet });
+/** The Mac's calendars (iCloud keeps them in sync with the iPhone). */
+const calendar = config.calendar ? new MacCalendar() : null;
+const { tools, health, bridge } = agentToolset({ store, timeZone: config.timeZone, healthMcpUrl: config.healthMcpUrl, watchlist, wallet, calendar });
 const system = agentSystemPrompt(ROOT, persona);
 
 /** What each kind of approval does once approved. A kind without a handler can't be approved. */
@@ -151,6 +157,7 @@ function status(): void {
   console.log(`Persona: ${persona}`);
   console.log(`Tools:   ${tools.definitions().map((t) => t.name).join(", ")}`);
   console.log(`Health:  ${health ? "connected to dearbyte-bridge (HEALTH_MCP_URL)" : "not set up (add HEALTH_MCP_URL to .env; see dearbyte-bridge docs/SETUP.md)"}`);
+  console.log(`Calendar: ${calendar ? "this Mac's calendars (npm run agent -- calendar to check access)" : "off (DEARBYTE_CALENDAR=off, or not on macOS)"}`);
   console.log(`Alerts:  ${telegram ? "Telegram, then the terminal" : telegramSetup ? "the terminal (Telegram needs TELEGRAM_CHAT_ID: npm run agent -- telegram)" : "the terminal and macOS notifications (npm run agent -- telegram to set up Telegram)"}`);
   console.log(
     `News:    ${
@@ -194,7 +201,7 @@ function inboxDeps(): InboxDeps & { bot: TelegramBot } {
 
 function scheduledDeps(): ScheduledDeps {
   if (!bridge) fail("Health isn't set up: add HEALTH_MCP_URL to .env (see dearbyte-bridge docs/SETUP.md).");
-  return { bridge, store, model: models.brain, tools, system, timeZone: config.timeZone, notify, onEvent: (e) => console.log(dim(describeEvent(e))) };
+  return { bridge, store, model: models.brain, tools, system, timeZone: config.timeZone, notify, calendar: calendar ?? undefined, onEvent: (e) => console.log(dim(describeEvent(e))) };
 }
 
 function watchlistDeps(): WatchlistDeps {
@@ -304,6 +311,23 @@ async function telegramCommand(): Promise<void> {
   console.log(decided?.status === "pending" ? "No tap arrived. Check the bot token and chat id, then try again." : `Telegram works: the test was ${decided?.status}.`);
 }
 
+/** Asks macOS for calendar access the first time, then lists the next 48 hours, as the agent will see them. */
+async function calendarCommand(): Promise<void> {
+  if (!calendar) return console.log("The calendar is off: it needs macOS, and DEARBYTE_CALENDAR not set to off.");
+  let access = await calendar.access();
+  if (access === "not_determined") {
+    console.log("macOS will ask whether your terminal may access your calendars. DearByte reads titles and times only, skips invites you declined or haven't answered, and sends the titles it uses to your model provider (they can appear in its messages, including Telegram).");
+    access = await calendar.requestAccess();
+  }
+  const now = new Date();
+  const result = await calendar.events(now, new Date(now.getTime() + 48 * 3_600_000));
+  if (result.status !== "ok") return console.log(result.message);
+  console.log(`Calendar access works. The next 48 hours (${config.timeZone}):`);
+  if (!result.events.length) console.log("  nothing scheduled");
+  for (const e of result.events) console.log(`  ${localDate(e.start, config.timeZone)} ${e.allDay ? "all day" : `${clock(e.start, config.timeZone)}-${clock(e.end, config.timeZone)}`}  ${e.title}`);
+  console.log(dim("If events you see on your iPhone are missing, check that those calendars sync through iCloud (not \"On My iPhone\")."));
+}
+
 /** Answers an approval request from the terminal. */
 async function answerApproval(id: number, verdict: "approve" | "reject"): Promise<void> {
   const d = await decide(store, approvalHandlers, id, verdict, { now: new Date(), via: "terminal" });
@@ -393,6 +417,7 @@ async function main(): Promise<void> {
     return answerApproval(id, command);
   }
   if (command === "telegram") return telegramCommand();
+  if (command === "calendar") return calendarCommand();
   if (command === "news") {
     if (loadedWatchlist && "problem" in loadedWatchlist) fail(loadedWatchlist.problem);
     return reportNews(await checkWatchlist(watchlistDeps()));

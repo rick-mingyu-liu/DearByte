@@ -17,6 +17,8 @@ export type Config = {
   agentWeeklyCap: number;
   /** The dearbyte-bridge MCP address (it contains a secret), or null when health data isn't set up. */
   healthMcpUrl: string | null;
+  /** Read the Mac's calendars (EventKit): on by default on macOS; DEARBYTE_CALENDAR=off turns it off. */
+  calendar: boolean;
   /** The testnet wallet: null when DEARBYTE_WALLET_KEY isn't set. */
   wallet: WalletConfig | { problem: string } | null;
   /** Path of watchlist.json (it may not exist). */
@@ -63,6 +65,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     agentWeeklyCap: nonNegative(merged.DEARBYTE_WEEKLY_CAP, DEFAULT_WEEKLY_CAP),
     agentPersona: resolvePersona(merged.DEARBYTE_PERSONA),
     healthMcpUrl: merged.HEALTH_MCP_URL?.trim() || null,
+    calendar: process.platform === "darwin" && merged.DEARBYTE_CALENDAR?.trim().toLowerCase() !== "off",
     wallet: resolveWallet(merged),
     watchlistPath: merged.DEARBYTE_WATCHLIST || join(ROOT, "watchlist.json"),
     secContact: /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(merged.SEC_CONTACT_EMAIL?.trim() ?? "") ? merged.SEC_CONTACT_EMAIL!.trim() : null,
