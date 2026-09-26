@@ -82,7 +82,7 @@ test("the abort signal reaches the SDK", async () => {
 });
 
 test("the fake plays back scripted steps and records requests", async () => {
-  const fake = new FakeAgentModel([FakeAgentModel.toolUse("get_calendar", { days: 1 }), FakeAgentModel.text("Two meetings.")]);
+  const fake = new FakeAgentModel([FakeAgentModel.toolUse(["get_calendar", { days: 1 }]), FakeAgentModel.text("Two meetings.")]);
   expect((await fake.step(request)).stopReason).toBe("tool_use");
   const last = await fake.step(request);
   expect(last.content).toEqual([{ type: "text", text: "Two meetings.", citations: null }]);
@@ -108,4 +108,43 @@ test("effort is sent only when set", async () => {
   await claude(client).step(request);
   expect(sent[0].params.output_config).toEqual({ effort: "high" });
   expect(sent[1].params).not.toHaveProperty("output_config");
+});
+
+/** A client whose first streams die midway with `error`, then succeed. */
+function flakyClient(failures: number, error: () => Error) {
+  let calls = 0;
+  const client = {
+    beta: {
+      messages: {
+        stream: () => {
+          calls++;
+          const fail = calls <= failures;
+          return { finalMessage: async () => (fail ? Promise.reject(error()) : toolUseMessage) };
+        },
+      },
+    },
+  };
+  return { client: client as never, calls: () => calls };
+}
+
+test("a stream that drops midway is asked again, up to twice", async () => {
+  const ok = flakyClient(2, () => new TypeError("terminated"));
+  expect((await claude(ok.client).step(request)).stopReason).toBe("tool_use");
+  expect(ok.calls()).toBe(3);
+
+  const down = flakyClient(3, () => new TypeError("terminated"));
+  await expect(claude(down.client).step(request)).rejects.toThrow("terminated");
+  expect(down.calls()).toBe(3);
+});
+
+test("other errors and cancelled requests are not retried", async () => {
+  const other = flakyClient(1, () => new Error("bad request"));
+  await expect(claude(other.client).step(request)).rejects.toThrow("bad request");
+  expect(other.calls()).toBe(1);
+
+  const cancelled = flakyClient(1, () => new TypeError("terminated"));
+  const controller = new AbortController();
+  controller.abort();
+  await expect(claude(cancelled.client).step({ ...request, signal: controller.signal })).rejects.toThrow("terminated");
+  expect(cancelled.calls()).toBe(1);
 });

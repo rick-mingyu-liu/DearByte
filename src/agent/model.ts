@@ -85,6 +85,15 @@ const FALLBACK_BETA = "server-side-fallback-2026-07-01";
 
 type StreamingClient = Pick<Anthropic, "beta">;
 
+/** Extra attempts after a stream drops midway. */
+const STREAM_RETRIES = 2;
+
+/** The connection died mid-response: undici's "terminated", or the SDK's connection error. */
+export function droppedStream(err: unknown): boolean {
+  if (err instanceof Anthropic.APIConnectionError) return !(err instanceof Anthropic.APIConnectionTimeoutError);
+  return err instanceof TypeError && err.message === "terminated";
+}
+
 export class MessagesAgentModel implements AgentModel {
   readonly name: string;
   readonly provider: AgentProvider;
@@ -102,6 +111,18 @@ export class MessagesAgentModel implements AgentModel {
   }
 
   async step(req: AgentRequest): Promise<AgentStep> {
+    // A stream can drop midway ("terminated"). Nothing has run yet, so asking again is safe;
+    // API errors are the SDK's to retry, and a cancelled request stays cancelled.
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await this.stepOnce(req);
+      } catch (err) {
+        if (attempt > STREAM_RETRIES || req.signal?.aborted || !droppedStream(err)) throw err;
+      }
+    }
+  }
+
+  private async stepOnce(req: AgentRequest): Promise<AgentStep> {
     const started = Date.now();
     const { fallbacks, adaptiveThinking } = this.preset;
     const stream = this.client.beta.messages.stream(
