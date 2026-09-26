@@ -38,6 +38,23 @@ CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
+
+-- One row per agent model call: what it cost and what it was for. The weekly
+-- spending cap is the sum of cost over the last 7 days. cost is NULL when unknown.
+CREATE TABLE IF NOT EXISTS agent_usage (
+  id INTEGER PRIMARY KEY,
+  at TEXT NOT NULL,
+  purpose TEXT NOT NULL,
+  tier TEXT NOT NULL,
+  model TEXT NOT NULL,
+  prompt_tokens INTEGER NOT NULL,
+  cache_hit_tokens INTEGER NOT NULL,
+  cache_write_tokens INTEGER NOT NULL,
+  completion_tokens INTEGER NOT NULL,
+  cost REAL,
+  ms INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS agent_usage_at ON agent_usage (at);
 `;
 
 /**
@@ -82,6 +99,31 @@ type FactRow = {
   forgotten_at: string | null;
   created_at: string;
   updated_at: string;
+};
+
+export type AgentUsage = {
+  at: string;
+  purpose: string;
+  tier: string;
+  model: string;
+  promptTokens: number;
+  cacheHitTokens: number;
+  cacheWriteTokens: number;
+  completionTokens: number;
+  cost: number | null;
+  ms: number;
+};
+
+export type AgentUsageTotal = {
+  purpose: string;
+  tier: string;
+  model: string;
+  calls: number;
+  promptTokens: number;
+  cacheHitTokens: number;
+  completionTokens: number;
+  cost: number;
+  unpriced: number;
 };
 
 export type UpsertResult = "inserted" | "updated" | "unchanged" | "blocked";
@@ -252,6 +294,32 @@ export class Store {
     this.db
       .prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
       .run(key, value);
+  }
+
+  recordAgentUsage(u: AgentUsage): void {
+    this.db
+      .prepare(
+        `INSERT INTO agent_usage (at, purpose, tier, model, prompt_tokens, cache_hit_tokens, cache_write_tokens, completion_tokens, cost, ms)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(u.at, u.purpose, u.tier, u.model, u.promptTokens, u.cacheHitTokens, u.cacheWriteTokens, u.completionTokens, u.cost, u.ms);
+  }
+
+  /** USD spent on agent calls since `since` (ISO); calls with unknown cost count as 0. */
+  agentSpendSince(since: string): number {
+    const row = this.db.prepare("SELECT COALESCE(SUM(cost), 0) AS spent FROM agent_usage WHERE at >= ?").get(since) as { spent: number };
+    return row.spent;
+  }
+
+  /** Totals since `since`, grouped by purpose, tier and model, most expensive first. */
+  agentUsageSummary(since: string): AgentUsageTotal[] {
+    return this.db
+      .prepare(
+        `SELECT purpose, tier, model, COUNT(*) AS calls, SUM(prompt_tokens) AS promptTokens, SUM(cache_hit_tokens) AS cacheHitTokens,
+                SUM(completion_tokens) AS completionTokens, COALESCE(SUM(cost), 0) AS cost, SUM(cost IS NULL) AS unpriced
+         FROM agent_usage WHERE at >= ? GROUP BY purpose, tier, model ORDER BY cost DESC`,
+      )
+      .all(since) as AgentUsageTotal[];
   }
 
   memoryEnabled(): boolean {

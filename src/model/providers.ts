@@ -54,7 +54,7 @@ export const PROVIDERS: Record<string, Preset> = {
  * USD per 1M tokens at peak rates for models we've checked. Anything else needs
  * COMPANION_PRICE_INPUT and COMPANION_PRICE_OUTPUT, so the per-reply cap works.
  */
-const KNOWN_PRICES: Record<string, Prices & { vision?: boolean }> = {
+export const KNOWN_PRICES: Record<string, Prices & { vision?: boolean }> = {
   // https://api-docs.deepseek.com/quick_start/pricing, checked 2026-09-24. Off-peak is half.
   "deepseek/deepseek-flash": { input: 0.3, cached: 0.006, output: 1.2, vision: true },
   "deepseek/deepseek-v4-pro": { input: 1.32, cached: 0.044, output: 3.96, vision: false },
