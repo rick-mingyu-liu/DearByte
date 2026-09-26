@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { resolveTiers, type Tier, type TierSettings } from "./agent/tiers.ts";
 import { DEFAULT_WEEKLY_CAP } from "./agent/usage.ts";
-import { PERSONAS, type Persona } from "./agent/persona.ts";
+import { DEFAULT_PERSONA, listPersonas } from "./agent/persona.ts";
 import { resolveModel, type ModelSettings } from "./model/providers.ts";
 import { resolveWallet, type WalletConfig } from "./wallet/config.ts";
 
@@ -27,8 +27,8 @@ export type Config = {
   secContact: string | null;
   /** Telegram for alerts and approvals: null when not set up; chatId is null until the setup step finds it. */
   telegram: { token: string; chatId: number | null } | { problem: string } | null;
-  /** The agent's persona, or what's wrong with DEARBYTE_PERSONA. */
-  agentPersona: Persona | { problem: string };
+  /** The agent's persona pack id (personas/<id>), or what's wrong with DEARBYTE_PERSONA. */
+  agentPersona: string | { problem: string };
   dbPath: string;
   timeZone: string;
   historyMessages: number;
@@ -88,7 +88,8 @@ function resolveTelegram(token: string | undefined, chat: string | undefined): C
   return /^-?\d+$/.test(chat) ? { token, chatId: Number(chat) } : { problem: "TELEGRAM_CHAT_ID should be a number (npm run agent -- telegram finds it)" };
 }
 
-function resolvePersona(value: string | undefined): Persona | { problem: string } {
-  const name = (value || "default").trim().toLowerCase();
-  return (PERSONAS as readonly string[]).includes(name) ? (name as Persona) : { problem: `DEARBYTE_PERSONA should be one of ${PERSONAS.join(", ")}` };
+function resolvePersona(value: string | undefined): string | { problem: string } {
+  const name = (value || DEFAULT_PERSONA).trim().toLowerCase();
+  const packs = listPersonas(ROOT);
+  return packs.includes(name) ? name : { problem: `DEARBYTE_PERSONA should be one of ${packs.join(", ")} (the folders in personas/)` };
 }

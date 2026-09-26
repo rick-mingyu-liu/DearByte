@@ -17,7 +17,8 @@
     "agent:usage": "tsx tools/agent-usage.ts",
     "agent": "tsx src/agent-cli.ts",
     "seller": "tsx examples/seller/server.ts",
-    "demo": "tsx tools/demo.ts"
+    "demo": "tsx tools/demo.ts",
+    "personas": "tsx tools/personas.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "0.128.0",

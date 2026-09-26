@@ -1,5 +1,5 @@
 {
-  "_readme": "Few-shot examples for persona.default.en.md. Only `context` and `user` and `reply` go into the prompt; `note` is author-only and must never be sent to the model. All examples are original and use made-up data.",
+  "_readme": "Few-shot examples for this pack's persona.md. Only `context` and `user` and `reply` go into the prompt; `note` is author-only and must never be sent to the model. All examples are original and use made-up data.",
   "examples": [
     {
       "id": "greeting",
