@@ -2,7 +2,7 @@
 
 # DearByte · 小拜 — Operations guide
 
-This guide covers 小拜, DearByte's Chinese companion mode (傲娇但细心, a tsundere girl) with persistent memory, in the terminal or WeChat. For the personal agent, see the [README](../README.md).
+This guide covers 小拜, DearByte's Chinese companion mode (傲娇但细心, a tsundere girl) with persistent memory, in the terminal or WeChat. For the personal agent (health, alerts, Telegram, watchlist, wallet), see the [agent guide](agent-guide.md).
 
 **Status** ([roadmap](../README.md#roadmap)):
 - The companion works in a terminal simulator.
