@@ -77,9 +77,26 @@ CREATE TABLE IF NOT EXISTS agent_alerts (
   kind TEXT NOT NULL,
   triggers TEXT NOT NULL,
   text TEXT NOT NULL,
-  delivered INTEGER NOT NULL DEFAULT 0
+  delivered INTEGER NOT NULL DEFAULT 0,
+  -- The user's verdict from the Telegram buttons: 'useful', 'noise' or NULL.
+  feedback TEXT
 );
 CREATE INDEX IF NOT EXISTS agent_alerts_date ON agent_alerts (date);
+
+-- Actions the agent may only take with the user's yes: each is proposed here,
+-- sent with Approve/Reject buttons, and decided once. A pending one past
+-- expires_at can no longer be approved.
+CREATE TABLE IF NOT EXISTS approvals (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  created_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  summary TEXT NOT NULL,
+  payload TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+  decided_at TEXT,
+  decided_via TEXT
+);
 `;
 
 /**
@@ -160,7 +177,32 @@ export type HealthDay = {
   hrvMs: number | null;
 };
 
-export type AgentAlert = { id: number; at: string; date: string; kind: string; triggers: string[]; text: string; delivered: boolean };
+export type AgentAlert = { id: number; at: string; date: string; kind: string; triggers: string[]; text: string; delivered: boolean; feedback: "useful" | "noise" | null };
+
+export type ApprovalStatus = "pending" | "approved" | "rejected";
+export type Approval = {
+  id: number;
+  createdAt: string;
+  expiresAt: string;
+  kind: string;
+  summary: string;
+  payload: unknown;
+  status: ApprovalStatus;
+  decidedAt: string | null;
+  decidedVia: string | null;
+};
+type ApprovalRow = { id: number; created_at: string; expires_at: string; kind: string; summary: string; payload: string; status: ApprovalStatus; decided_at: string | null; decided_via: string | null };
+const toApproval = (r: ApprovalRow): Approval => ({
+  id: r.id,
+  createdAt: r.created_at,
+  expiresAt: r.expires_at,
+  kind: r.kind,
+  summary: r.summary,
+  payload: JSON.parse(r.payload),
+  status: r.status,
+  decidedAt: r.decided_at,
+  decidedVia: r.decided_via,
+});
 
 export type UpsertResult = "inserted" | "updated" | "unchanged" | "blocked";
 
@@ -198,6 +240,9 @@ export class Store {
     migrateMessagesToAutoincrement(db);
     db.exec("PRAGMA foreign_keys = ON;");
     db.exec(SCHEMA);
+    // agent_alerts gained feedback after it first shipped.
+    const alertColumns = db.prepare("PRAGMA table_info(agent_alerts)").all() as Array<{ name: string }>;
+    if (!alertColumns.some((c) => c.name === "feedback")) db.exec("ALTER TABLE agent_alerts ADD COLUMN feedback TEXT");
     return new Store(db);
   }
 
@@ -391,17 +436,57 @@ export class Store {
   }
 
   alertsOn(date: string): AgentAlert[] {
-    const rows = this.db.prepare("SELECT id, at, date, kind, triggers, text, delivered FROM agent_alerts WHERE date = ? ORDER BY id").all(date) as Array<
+    const rows = this.db.prepare("SELECT id, at, date, kind, triggers, text, delivered, feedback FROM agent_alerts WHERE date = ? ORDER BY id").all(date) as Array<
       Omit<AgentAlert, "triggers" | "delivered"> & { triggers: string; delivered: number }
     >;
     return rows.map((r) => ({ ...r, triggers: JSON.parse(r.triggers), delivered: r.delivered === 1 }));
   }
 
   recentAlerts(limit: number): AgentAlert[] {
-    const rows = this.db.prepare("SELECT id, at, date, kind, triggers, text, delivered FROM agent_alerts ORDER BY id DESC LIMIT ?").all(limit) as Array<
+    const rows = this.db.prepare("SELECT id, at, date, kind, triggers, text, delivered, feedback FROM agent_alerts ORDER BY id DESC LIMIT ?").all(limit) as Array<
       Omit<AgentAlert, "triggers" | "delivered"> & { triggers: string; delivered: number }
     >;
     return rows.map((r) => ({ ...r, triggers: JSON.parse(r.triggers), delivered: r.delivered === 1 }));
+  }
+
+  /** Stores the user's verdict on an alert; false when there's no such alert. */
+  setAlertFeedback(id: number, feedback: "useful" | "noise"): boolean {
+    return Number(this.db.prepare("UPDATE agent_alerts SET feedback = ? WHERE id = ?").run(feedback, id).changes) > 0;
+  }
+
+  /** How many alerts got each verdict since `sinceDate` (YYYY-MM-DD). */
+  alertFeedback(sinceDate: string): { sent: number; useful: number; noise: number } {
+    return this.db
+      .prepare("SELECT COUNT(*) AS sent, COALESCE(SUM(feedback = 'useful'), 0) AS useful, COALESCE(SUM(feedback = 'noise'), 0) AS noise FROM agent_alerts WHERE date >= ?")
+      .get(sinceDate) as { sent: number; useful: number; noise: number };
+  }
+
+  createApproval(a: { createdAt: string; expiresAt: string; kind: string; summary: string; payload: unknown }): Approval {
+    const row = this.db
+      .prepare("INSERT INTO approvals (created_at, expires_at, kind, summary, payload) VALUES (?, ?, ?, ?, ?) RETURNING *")
+      .get(a.createdAt, a.expiresAt, a.kind, a.summary, JSON.stringify(a.payload ?? null)) as ApprovalRow;
+    return toApproval(row);
+  }
+
+  approval(id: number): Approval | null {
+    const row = this.db.prepare("SELECT * FROM approvals WHERE id = ?").get(id) as ApprovalRow | undefined;
+    return row ? toApproval(row) : null;
+  }
+
+  /**
+   * Decides a pending, unexpired approval in one statement, so two taps (or a
+   * tap and an expiry) can't both win. Returns the decided approval, or null
+   * when it wasn't pending or had expired.
+   */
+  decideApproval(id: number, status: "approved" | "rejected", at: string, via: string): Approval | null {
+    const row = this.db
+      .prepare("UPDATE approvals SET status = ?, decided_at = ?, decided_via = ? WHERE id = ? AND status = 'pending' AND expires_at > ? RETURNING *")
+      .get(status, at, via, id, at) as ApprovalRow | undefined;
+    return row ? toApproval(row) : null;
+  }
+
+  recentApprovals(limit: number): Approval[] {
+    return (this.db.prepare("SELECT * FROM approvals ORDER BY id DESC LIMIT ?").all(limit) as ApprovalRow[]).map(toApproval);
   }
 
   markAlertDelivered(id: number): void {

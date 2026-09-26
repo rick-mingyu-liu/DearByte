@@ -10,6 +10,7 @@
 //   npm run agent -- check             run the caution rules once
 //   npm run agent -- watch             keep running: brief at 07:30, checks every 15 min
 //   npm run agent -- alerts            what DearByte sent on its own lately
+//   npm run agent -- telegram          set up Telegram, or test it with a sample approval
 
 import { createInterface } from "node:readline/promises";
 import Anthropic from "@anthropic-ai/sdk";
@@ -22,8 +23,11 @@ import { createTierModels } from "./agent/tiers.ts";
 import { agentToolset } from "./agent/toolset.ts";
 import { WEEK_MS } from "./agent/usage.ts";
 import { runCautionCheck, runMorningBrief, tick, type Notify, type Outcome, type ScheduledDeps } from "./agent/scheduled.ts";
+import { proposeApproval, type ApprovalHandlers } from "./agent/approvals.ts";
 import { systemNotifier } from "./alerts.ts";
 import { Store } from "./storage/store.ts";
+import { TelegramBot } from "./telegram/bot.ts";
+import { feedbackButtons, pollInbox, sendApproval, type InboxDeps } from "./telegram/inbox.ts";
 
 const USAGE = `Usage:
   npm run agent -- ask "question"   answer one question
@@ -32,11 +36,12 @@ const USAGE = `Usage:
   npm run agent -- brief [--force]  send the morning brief now
   npm run agent -- check            run the caution rules once
   npm run agent -- watch            keep running: brief at 07:30, caution checks every 15 min
-  npm run agent -- alerts           recent briefs and alerts`;
+  npm run agent -- alerts           recent briefs and alerts
+  npm run agent -- telegram         set up Telegram, or test it`;
 
 const config = loadConfig();
 const [command, ...rest] = process.argv.slice(2);
-if (!["ask", "chat", "status", "brief", "check", "watch", "alerts"].includes(command ?? "")) {
+if (!["ask", "chat", "status", "brief", "check", "watch", "alerts", "telegram"].includes(command ?? "")) {
   console.log(USAGE);
   process.exit(command ? 1 : 0);
 }
@@ -49,6 +54,15 @@ const store = Store.open(config.dbPath);
 const models = createTierModels(tiers, { store, weeklyCap: config.agentWeeklyCap });
 const { tools, health, bridge } = agentToolset({ store, timeZone: config.timeZone, healthMcpUrl: config.healthMcpUrl });
 const system = agentSystemPrompt(ROOT, persona);
+if (config.telegram && "problem" in config.telegram) fail(config.telegram.problem);
+const telegramSetup = config.telegram;
+/** Telegram, once both the token and the chat are known. */
+const telegram = telegramSetup?.chatId ? { bot: new TelegramBot(telegramSetup.token), chatId: telegramSetup.chatId } : null;
+
+/** What each kind of approval does once approved. The wallet adds "purchase". */
+const approvalHandlers: ApprovalHandlers = {
+  test: async () => "This was a test, so nothing else happens.",
+};
 
 function fail(message: string): never {
   console.error(message);
@@ -104,18 +118,34 @@ function status(): void {
   console.log(`Persona: ${persona}`);
   console.log(`Tools:   ${tools.definitions().map((t) => t.name).join(", ")}`);
   console.log(`Health:  ${health ? "connected to dearbyte-bridge (HEALTH_MCP_URL)" : "not set up (add HEALTH_MCP_URL to .env; see dearbyte-bridge docs/SETUP.md)"}`);
+  console.log(`Alerts:  ${telegram ? "Telegram, then the terminal" : telegramSetup ? "the terminal (Telegram needs TELEGRAM_CHAT_ID: npm run agent -- telegram)" : "the terminal and macOS notifications (npm run agent -- telegram to set up Telegram)"}`);
+  const fb = store.alertFeedback(new Date(Date.now() - WEEK_MS).toISOString().slice(0, 10));
+  if (fb.sent) console.log(`Rated:   ${fb.sent} alerts in the last 7 days, ${fb.useful} useful, ${fb.noise} not useful`);
   console.log(`Memory:  ${store.memoryEnabled() ? `on, ${store.activeFacts().length} facts` : "off"}`);
   console.log(
     `Spend:   $${weekSpend.toFixed(4)} in the last 7 days${config.agentWeeklyCap > 0 ? ` of a $${config.agentWeeklyCap} cap` : " (no cap)"} · npm run agent:usage for details`,
   );
 }
 
-/** For now: the terminal plus a macOS notification. Telegram takes over when it's set up. */
-const notify: Notify = async (title, body) => {
+/** Always printed here; sent to Telegram when it's set up, otherwise (or if Telegram fails) shown as a macOS notification. */
+const notify: Notify = async (title, body, o = {}) => {
   console.log(`\n── ${title} ──\n${body}\n`);
+  if (telegram) {
+    try {
+      await telegram.bot.send(telegram.chatId, `${title}\n\n${body}`, o.alertId ? feedbackButtons(o.alertId) : []);
+      return true;
+    } catch (err) {
+      console.error(dim(`${(err as Error).message}; showing a macOS notification instead`));
+    }
+  }
   systemNotifier(config.alertUrl, (m) => console.error(m))(title, body.slice(0, 200));
   return true;
 };
+
+function inboxDeps(): InboxDeps & { bot: TelegramBot } {
+  if (!telegram) fail("Telegram isn't set up: npm run agent -- telegram");
+  return { ...telegram, store, handlers: approvalHandlers };
+}
 
 function scheduledDeps(): ScheduledDeps {
   if (!bridge) fail("Health isn't set up: add HEALTH_MCP_URL to .env (see dearbyte-bridge docs/SETUP.md).");
@@ -131,7 +161,8 @@ function listAlerts(): void {
   const alerts = store.recentAlerts(10);
   if (!alerts.length) return console.log("Nothing sent yet.");
   for (const a of alerts.reverse()) {
-    console.log(dim(`${a.at.slice(0, 16).replace("T", " ")} UTC · ${a.kind}${a.triggers.length ? ` · ${a.triggers.join(", ")}` : ""}${a.delivered ? "" : " · not delivered"}`));
+    const rated = a.feedback ? ` · rated ${a.feedback === "useful" ? "useful" : "not useful"}` : "";
+    console.log(dim(`${a.at.slice(0, 16).replace("T", " ")} UTC · ${a.kind}${a.triggers.length ? ` · ${a.triggers.join(", ")}` : ""}${a.delivered ? "" : " · not delivered"}${rated}`));
     console.log(`${a.text}\n`);
   }
 }
@@ -141,6 +172,13 @@ const TICK_MS = 15 * 60_000;
 async function watch(): Promise<void> {
   const deps = scheduledDeps();
   console.log(dim(`Watching: morning brief after 07:30, caution checks every 15 minutes, quiet 23:00-07:00 (${config.timeZone}). Ctrl-C to stop.`));
+  if (telegram) {
+    // Button taps are handled alongside the checks, for as long as watch runs.
+    const stop = new AbortController();
+    process.once("SIGINT", () => (stop.abort(), process.exit(0)));
+    void pollInbox(inboxDeps(), { signal: stop.signal, log: (line) => console.log(dim(`telegram: ${line}`)) });
+    console.log(dim("Telegram: sending alerts and listening for button taps."));
+  }
   for (;;) {
     try {
       report(await tick(deps));
@@ -152,7 +190,48 @@ async function watch(): Promise<void> {
   }
 }
 
+const TELEGRAM_STEPS = `Telegram setup:
+  1. In Telegram, message @BotFather, send /newbot, and follow the steps. It gives you a token.
+  2. Add it to .env:  TELEGRAM_BOT_TOKEN=<token>   (keep it secret: whoever has it controls the bot)
+  3. Send your new bot any message (for example "hi").
+  4. Run  npm run agent -- telegram  again to find your chat id.`;
+
+/** Setup in steps: without a token, the instructions; without a chat id, find it; with both, a live test. */
+async function telegramCommand(): Promise<void> {
+  if (!telegramSetup) return console.log(TELEGRAM_STEPS);
+  if (!telegram) {
+    const updates = await new TelegramBot(telegramSetup.token).updates(0, 0);
+    const chats = new Map<number, string>();
+    for (const u of updates) {
+      const chat = u.message?.chat;
+      if (chat?.type === "private") chats.set(chat.id, chat.first_name ?? chat.username ?? "unknown");
+    }
+    if (!chats.size) return console.log("No messages yet. Send your bot any message in Telegram, then run this again.");
+    for (const [id, name] of chats) console.log(`Chat with ${name}: add  TELEGRAM_CHAT_ID=${id}  to .env`);
+    console.log(dim("Only this chat will be able to use the buttons; messages from anyone else are ignored."));
+    return;
+  }
+  const deps = inboxDeps();
+  await deps.bot.send(deps.chatId, "DearByte is connected. Alerts and approval requests will come here.");
+  const approval = proposeApproval(store, { kind: "test", summary: "Test: tap Approve or Reject to check the buttons work. Nothing happens either way.", payload: null }, new Date());
+  await sendApproval(deps.bot, deps.chatId, approval);
+  console.log("Sent a test approval to Telegram. Tap a button there (waiting up to 2 minutes)...");
+  const stop = new AbortController();
+  const timer = setTimeout(() => stop.abort(), 120_000);
+  await pollInbox(deps, {
+    signal: stop.signal,
+    log: (line) => {
+      console.log(dim(`telegram: ${line}`));
+      if (line.startsWith(`approval ${approval.id}:`)) stop.abort();
+    },
+  });
+  clearTimeout(timer);
+  const decided = store.approval(approval.id);
+  console.log(decided?.status === "pending" ? "No tap arrived. Check the bot token and chat id, then try again." : `Telegram works: the test was ${decided?.status}.`);
+}
+
 async function main(): Promise<void> {
+  if (command === "telegram") return telegramCommand();
   if (command === "status") return status();
   if (command === "alerts") return listAlerts();
   if (command === "brief") return report(await runMorningBrief(scheduledDeps(), { force: rest.includes("--force") }));
