@@ -16,6 +16,8 @@ export type Config = {
   agentWeeklyCap: number;
   /** The dearbyte-bridge MCP address (it contains a secret), or null when health data isn't set up. */
   healthMcpUrl: string | null;
+  /** Telegram for alerts and approvals: null when not set up; chatId is null until the setup step finds it. */
+  telegram: { token: string; chatId: number | null } | { problem: string } | null;
   /** The agent's persona, or what's wrong with DEARBYTE_PERSONA. */
   agentPersona: Persona | { problem: string };
   dbPath: string;
@@ -54,6 +56,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     agentWeeklyCap: nonNegative(merged.DEARBYTE_WEEKLY_CAP, DEFAULT_WEEKLY_CAP),
     agentPersona: resolvePersona(merged.DEARBYTE_PERSONA),
     healthMcpUrl: merged.HEALTH_MCP_URL?.trim() || null,
+    telegram: resolveTelegram(merged.TELEGRAM_BOT_TOKEN, merged.TELEGRAM_CHAT_ID),
     dbPath: merged.COMPANION_DB || join(ROOT, "data/companion.sqlite"),
     timeZone: merged.COMPANION_TZ || Intl.DateTimeFormat().resolvedOptions().timeZone,
     historyMessages: Number(merged.COMPANION_HISTORY_MESSAGES || 40),
@@ -61,6 +64,15 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     wechatMediaDir: merged.COMPANION_WECHAT_MEDIA_DIR || null,
     alertUrl: merged.COMPANION_ALERT_URL || null,
   };
+}
+
+function resolveTelegram(token: string | undefined, chat: string | undefined): Config["telegram"] {
+  token = token?.trim();
+  chat = chat?.trim();
+  if (!token) return chat ? { problem: "TELEGRAM_CHAT_ID is set but TELEGRAM_BOT_TOKEN isn't" } : null;
+  if (!/^\d+:[\w-]{30,}$/.test(token)) return { problem: "TELEGRAM_BOT_TOKEN doesn't look like a bot token (it should be like 123456:ABC..., from @BotFather)" };
+  if (!chat) return { token, chatId: null };
+  return /^-?\d+$/.test(chat) ? { token, chatId: Number(chat) } : { problem: "TELEGRAM_CHAT_ID should be a number (npm run agent -- telegram finds it)" };
 }
 
 function resolvePersona(value: string | undefined): Persona | { problem: string } {

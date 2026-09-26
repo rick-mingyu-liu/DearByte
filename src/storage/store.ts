@@ -55,6 +55,48 @@ CREATE TABLE IF NOT EXISTS agent_usage (
   ms INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS agent_usage_at ON agent_usage (at);
+
+-- One row per day (the day you woke up): what DearByte saw, so it can learn
+-- your normal beyond the bridge's short retention. NULL = not recorded.
+CREATE TABLE IF NOT EXISTS health_daily (
+  date TEXT PRIMARY KEY,
+  asleep_minutes INTEGER,
+  deep_minutes INTEGER,
+  rem_minutes INTEGER,
+  resting_hr REAL,
+  hrv_ms REAL,
+  updated_at TEXT NOT NULL
+);
+
+-- Everything the agent sent on its own: morning briefs and caution alerts.
+-- kind + date keep one brief a day and each caution once a day.
+CREATE TABLE IF NOT EXISTS agent_alerts (
+  id INTEGER PRIMARY KEY,
+  at TEXT NOT NULL,
+  date TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  triggers TEXT NOT NULL,
+  text TEXT NOT NULL,
+  delivered INTEGER NOT NULL DEFAULT 0,
+  -- The user's verdict from the Telegram buttons: 'useful', 'noise' or NULL.
+  feedback TEXT
+);
+CREATE INDEX IF NOT EXISTS agent_alerts_date ON agent_alerts (date);
+
+-- Actions the agent may only take with the user's yes: each is proposed here,
+-- sent with Approve/Reject buttons, and decided once. A pending one past
+-- expires_at can no longer be approved.
+CREATE TABLE IF NOT EXISTS approvals (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  created_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  summary TEXT NOT NULL,
+  payload TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+  decided_at TEXT,
+  decided_via TEXT
+);
 `;
 
 /**
@@ -126,6 +168,42 @@ export type AgentUsageTotal = {
   unpriced: number;
 };
 
+export type HealthDay = {
+  date: string;
+  asleepMinutes: number | null;
+  deepMinutes: number | null;
+  remMinutes: number | null;
+  restingHr: number | null;
+  hrvMs: number | null;
+};
+
+export type AgentAlert = { id: number; at: string; date: string; kind: string; triggers: string[]; text: string; delivered: boolean; feedback: "useful" | "noise" | null };
+
+export type ApprovalStatus = "pending" | "approved" | "rejected";
+export type Approval = {
+  id: number;
+  createdAt: string;
+  expiresAt: string;
+  kind: string;
+  summary: string;
+  payload: unknown;
+  status: ApprovalStatus;
+  decidedAt: string | null;
+  decidedVia: string | null;
+};
+type ApprovalRow = { id: number; created_at: string; expires_at: string; kind: string; summary: string; payload: string; status: ApprovalStatus; decided_at: string | null; decided_via: string | null };
+const toApproval = (r: ApprovalRow): Approval => ({
+  id: r.id,
+  createdAt: r.created_at,
+  expiresAt: r.expires_at,
+  kind: r.kind,
+  summary: r.summary,
+  payload: JSON.parse(r.payload),
+  status: r.status,
+  decidedAt: r.decided_at,
+  decidedVia: r.decided_via,
+});
+
 export type UpsertResult = "inserted" | "updated" | "unchanged" | "blocked";
 
 const toMessage = (r: MessageRow): StoredMessage => ({
@@ -162,6 +240,9 @@ export class Store {
     migrateMessagesToAutoincrement(db);
     db.exec("PRAGMA foreign_keys = ON;");
     db.exec(SCHEMA);
+    // agent_alerts gained feedback after it first shipped.
+    const alertColumns = db.prepare("PRAGMA table_info(agent_alerts)").all() as Array<{ name: string }>;
+    if (!alertColumns.some((c) => c.name === "feedback")) db.exec("ALTER TABLE agent_alerts ADD COLUMN feedback TEXT");
     return new Store(db);
   }
 
@@ -320,6 +401,96 @@ export class Store {
          FROM agent_usage WHERE at >= ? GROUP BY purpose, tier, model ORDER BY cost DESC`,
       )
       .all(since) as AgentUsageTotal[];
+  }
+
+  /** Records what's known for a day; a NULL never overwrites a known value. */
+  upsertHealthDay(d: HealthDay, now = new Date().toISOString()): void {
+    this.db
+      .prepare(
+        `INSERT INTO health_daily (date, asleep_minutes, deep_minutes, rem_minutes, resting_hr, hrv_ms, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(date) DO UPDATE SET
+           asleep_minutes = COALESCE(excluded.asleep_minutes, asleep_minutes),
+           deep_minutes = COALESCE(excluded.deep_minutes, deep_minutes),
+           rem_minutes = COALESCE(excluded.rem_minutes, rem_minutes),
+           resting_hr = COALESCE(excluded.resting_hr, resting_hr),
+           hrv_ms = COALESCE(excluded.hrv_ms, hrv_ms),
+           updated_at = excluded.updated_at`,
+      )
+      .run(d.date, d.asleepMinutes, d.deepMinutes, d.remMinutes, d.restingHr, d.hrvMs, now);
+  }
+
+  /** Days from `from` to `to` inclusive (YYYY-MM-DD), oldest first. */
+  healthDays(from: string, to: string): HealthDay[] {
+    const rows = this.db
+      .prepare("SELECT date, asleep_minutes, deep_minutes, rem_minutes, resting_hr, hrv_ms FROM health_daily WHERE date >= ? AND date <= ? ORDER BY date")
+      .all(from, to) as Array<{ date: string; asleep_minutes: number | null; deep_minutes: number | null; rem_minutes: number | null; resting_hr: number | null; hrv_ms: number | null }>;
+    return rows.map((r) => ({ date: r.date, asleepMinutes: r.asleep_minutes, deepMinutes: r.deep_minutes, remMinutes: r.rem_minutes, restingHr: r.resting_hr, hrvMs: r.hrv_ms }));
+  }
+
+  recordAlert(a: { at: string; date: string; kind: string; triggers: string[]; text: string; delivered: boolean }): number {
+    const row = this.db
+      .prepare("INSERT INTO agent_alerts (at, date, kind, triggers, text, delivered) VALUES (?, ?, ?, ?, ?, ?) RETURNING id")
+      .get(a.at, a.date, a.kind, JSON.stringify(a.triggers), a.text, a.delivered ? 1 : 0) as { id: number };
+    return row.id;
+  }
+
+  alertsOn(date: string): AgentAlert[] {
+    const rows = this.db.prepare("SELECT id, at, date, kind, triggers, text, delivered, feedback FROM agent_alerts WHERE date = ? ORDER BY id").all(date) as Array<
+      Omit<AgentAlert, "triggers" | "delivered"> & { triggers: string; delivered: number }
+    >;
+    return rows.map((r) => ({ ...r, triggers: JSON.parse(r.triggers), delivered: r.delivered === 1 }));
+  }
+
+  recentAlerts(limit: number): AgentAlert[] {
+    const rows = this.db.prepare("SELECT id, at, date, kind, triggers, text, delivered, feedback FROM agent_alerts ORDER BY id DESC LIMIT ?").all(limit) as Array<
+      Omit<AgentAlert, "triggers" | "delivered"> & { triggers: string; delivered: number }
+    >;
+    return rows.map((r) => ({ ...r, triggers: JSON.parse(r.triggers), delivered: r.delivered === 1 }));
+  }
+
+  /** Stores the user's verdict on an alert; false when there's no such alert. */
+  setAlertFeedback(id: number, feedback: "useful" | "noise"): boolean {
+    return Number(this.db.prepare("UPDATE agent_alerts SET feedback = ? WHERE id = ?").run(feedback, id).changes) > 0;
+  }
+
+  /** How many alerts got each verdict since `sinceDate` (YYYY-MM-DD). */
+  alertFeedback(sinceDate: string): { sent: number; useful: number; noise: number } {
+    return this.db
+      .prepare("SELECT COUNT(*) AS sent, COALESCE(SUM(feedback = 'useful'), 0) AS useful, COALESCE(SUM(feedback = 'noise'), 0) AS noise FROM agent_alerts WHERE date >= ?")
+      .get(sinceDate) as { sent: number; useful: number; noise: number };
+  }
+
+  createApproval(a: { createdAt: string; expiresAt: string; kind: string; summary: string; payload: unknown }): Approval {
+    const row = this.db
+      .prepare("INSERT INTO approvals (created_at, expires_at, kind, summary, payload) VALUES (?, ?, ?, ?, ?) RETURNING *")
+      .get(a.createdAt, a.expiresAt, a.kind, a.summary, JSON.stringify(a.payload ?? null)) as ApprovalRow;
+    return toApproval(row);
+  }
+
+  approval(id: number): Approval | null {
+    const row = this.db.prepare("SELECT * FROM approvals WHERE id = ?").get(id) as ApprovalRow | undefined;
+    return row ? toApproval(row) : null;
+  }
+
+  /**
+   * Decides a pending, unexpired approval in one statement, so two taps (or a
+   * tap and an expiry) can't both win. Returns the decided approval, or null
+   * when it wasn't pending or had expired.
+   */
+  decideApproval(id: number, status: "approved" | "rejected", at: string, via: string): Approval | null {
+    const row = this.db
+      .prepare("UPDATE approvals SET status = ?, decided_at = ?, decided_via = ? WHERE id = ? AND status = 'pending' AND expires_at > ? RETURNING *")
+      .get(status, at, via, id, at) as ApprovalRow | undefined;
+    return row ? toApproval(row) : null;
+  }
+
+  recentApprovals(limit: number): Approval[] {
+    return (this.db.prepare("SELECT * FROM approvals ORDER BY id DESC LIMIT ?").all(limit) as ApprovalRow[]).map(toApproval);
+  }
+
+  markAlertDelivered(id: number): void {
+    this.db.prepare("UPDATE agent_alerts SET delivered = 1 WHERE id = ?").run(id);
   }
 
   memoryEnabled(): boolean {
