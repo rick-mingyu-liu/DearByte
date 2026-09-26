@@ -1,0 +1,8 @@
+{
+  "interests": "I'm applying for software engineering internships, Meta first. Tell me about product launches, AI models and research, earnings, leadership changes, layoffs or hiring freezes, and big legal or regulatory news. Skip routine marketing, event recaps and small feature updates.",
+  "companies": [
+    { "name": "Meta", "cik": 1326801, "feeds": ["https://about.fb.com/feed/"] },
+    { "name": "Apple", "cik": 320193, "feeds": ["https://www.apple.com/newsroom/rss-feed.rss"] },
+    { "name": "NVIDIA", "cik": 1045810, "feeds": ["https://nvidianews.nvidia.com/releases.xml"] }
+  ]
+}

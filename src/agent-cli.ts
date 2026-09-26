@@ -11,6 +11,7 @@
 //   npm run agent -- watch             keep running: brief at 07:30, checks every 15 min
 //   npm run agent -- alerts            what DearByte sent on its own lately
 //   npm run agent -- telegram          set up Telegram, or test it with a sample approval
+//   npm run agent -- news              check the company watchlist once
 
 import { createInterface } from "node:readline/promises";
 import Anthropic from "@anthropic-ai/sdk";
@@ -28,6 +29,8 @@ import { systemNotifier } from "./alerts.ts";
 import { Store } from "./storage/store.ts";
 import { TelegramBot } from "./telegram/bot.ts";
 import { feedbackButtons, pollInbox, sendApproval, type InboxDeps } from "./telegram/inbox.ts";
+import { checkWatchlist, type WatchlistDeps, type WatchOutcome } from "./watchlist/check.ts";
+import { loadWatchlist } from "./watchlist/config.ts";
 
 const USAGE = `Usage:
   npm run agent -- ask "question"   answer one question
@@ -37,11 +40,12 @@ const USAGE = `Usage:
   npm run agent -- check            run the caution rules once
   npm run agent -- watch            keep running: brief at 07:30, caution checks every 15 min
   npm run agent -- alerts           recent briefs and alerts
-  npm run agent -- telegram         set up Telegram, or test it`;
+  npm run agent -- telegram         set up Telegram, or test it
+  npm run agent -- news             check the company watchlist now`;
 
 const config = loadConfig();
 const [command, ...rest] = process.argv.slice(2);
-if (!["ask", "chat", "status", "brief", "check", "watch", "alerts", "telegram"].includes(command ?? "")) {
+if (!["ask", "chat", "status", "brief", "check", "watch", "alerts", "telegram", "news"].includes(command ?? "")) {
   console.log(USAGE);
   process.exit(command ? 1 : 0);
 }
@@ -52,7 +56,10 @@ const tiers = config.agent;
 
 const store = Store.open(config.dbPath);
 const models = createTierModels(tiers, { store, weeklyCap: config.agentWeeklyCap });
-const { tools, health, bridge } = agentToolset({ store, timeZone: config.timeZone, healthMcpUrl: config.healthMcpUrl });
+const loadedWatchlist = loadWatchlist(config.watchlistPath);
+if (loadedWatchlist && "problem" in loadedWatchlist) console.error(dim(`Watchlist ignored: ${loadedWatchlist.problem}`));
+const watchlist = loadedWatchlist && !("problem" in loadedWatchlist) ? loadedWatchlist : null;
+const { tools, health, bridge } = agentToolset({ store, timeZone: config.timeZone, healthMcpUrl: config.healthMcpUrl, watchlist });
 const system = agentSystemPrompt(ROOT, persona);
 if (config.telegram && "problem" in config.telegram) fail(config.telegram.problem);
 const telegramSetup = config.telegram;
@@ -119,6 +126,13 @@ function status(): void {
   console.log(`Tools:   ${tools.definitions().map((t) => t.name).join(", ")}`);
   console.log(`Health:  ${health ? "connected to dearbyte-bridge (HEALTH_MCP_URL)" : "not set up (add HEALTH_MCP_URL to .env; see dearbyte-bridge docs/SETUP.md)"}`);
   console.log(`Alerts:  ${telegram ? "Telegram, then the terminal" : telegramSetup ? "the terminal (Telegram needs TELEGRAM_CHAT_ID: npm run agent -- telegram)" : "the terminal and macOS notifications (npm run agent -- telegram to set up Telegram)"}`);
+  console.log(
+    `News:    ${
+      watchlist
+        ? `${watchlist.companies.map((c) => c.name).join(", ")} (newsrooms${config.secContact ? " and SEC filings" : "; SEC filings need SEC_CONTACT_EMAIL"})`
+        : "no watchlist (copy watchlist.example.json to watchlist.json)"
+    }`,
+  );
   const fb = store.alertFeedback(new Date(Date.now() - WEEK_MS).toISOString().slice(0, 10));
   if (fb.sent) console.log(`Rated:   ${fb.sent} alerts in the last 7 days, ${fb.useful} useful, ${fb.noise} not useful`);
   console.log(`Memory:  ${store.memoryEnabled() ? `on, ${store.activeFacts().length} facts` : "off"}`);
@@ -152,6 +166,17 @@ function scheduledDeps(): ScheduledDeps {
   return { bridge, store, model: models.brain, tools, system, timeZone: config.timeZone, notify, onEvent: (e) => console.log(dim(describeEvent(e))) };
 }
 
+function watchlistDeps(): WatchlistDeps {
+  if (!watchlist) fail("No watchlist: copy watchlist.example.json to watchlist.json and edit it.");
+  return { store, model: models.brain, worker: models.worker, tools, system, timeZone: config.timeZone, notify, watchlist, secContact: config.secContact, onEvent: (e) => console.log(dim(describeEvent(e))) };
+}
+
+function reportNews(o: WatchOutcome): void {
+  for (const e of o.errors) console.error(dim(`source failed: ${e}`));
+  console.log(dim(`news: ${o.added} new, ${o.screened} screened, ${o.relevant} worth a message`));
+  if (o.message) report(o.message);
+}
+
 function report(o: Outcome): void {
   if (!o.sent) console.log(dim(`nothing sent: ${o.reason}${o.triggers.length ? ` (rules: ${o.triggers.map((t) => t.kind).join(", ")})` : ""}`));
   else if (!o.delivered) console.log("Written, but delivery failed; it's saved in npm run agent -- alerts.");
@@ -168,10 +193,17 @@ function listAlerts(): void {
 }
 
 const TICK_MS = 15 * 60_000;
+/** The watchlist is checked every this many ticks (hourly). */
+const NEWS_EVERY = 4;
 
 async function watch(): Promise<void> {
-  const deps = scheduledDeps();
-  console.log(dim(`Watching: morning brief after 07:30, caution checks every 15 minutes, quiet 23:00-07:00 (${config.timeZone}). Ctrl-C to stop.`));
+  // Health and news each run when they're set up; at least one must be.
+  const deps = bridge ? scheduledDeps() : null;
+  const news = watchlist ? watchlistDeps() : null;
+  if (!deps && !news) fail("Nothing to watch: set up health (HEALTH_MCP_URL) or a watchlist (watchlist.json).");
+  if (deps) console.log(dim(`Health: morning brief after 07:30, caution checks every 15 minutes, quiet 23:00-07:00 (${config.timeZone}).`));
+  if (news) console.log(dim(`News: checking ${news.watchlist.companies.length} companies every hour.`));
+  console.log(dim("Ctrl-C to stop."));
   if (telegram) {
     // Button taps are handled alongside the checks, for as long as watch runs.
     const stop = new AbortController();
@@ -183,12 +215,19 @@ async function watch(): Promise<void> {
     });
     console.log(dim("Telegram: sending alerts and listening for button taps."));
   }
-  for (;;) {
+  for (let n = 0; ; n++) {
     try {
-      report(await tick(deps));
+      if (deps) report(await tick(deps));
     } catch (err) {
       // One failed tick (bridge down, model error) must not stop the loop.
       console.error(dim(`check failed: ${(err as Error).message}`));
+    }
+    if (news && n % NEWS_EVERY === 0) {
+      try {
+        reportNews(await checkWatchlist(news));
+      } catch (err) {
+        console.error(dim(`news check failed: ${(err as Error).message}`));
+      }
     }
     await new Promise((r) => setTimeout(r, TICK_MS));
   }
@@ -236,6 +275,10 @@ async function telegramCommand(): Promise<void> {
 
 async function main(): Promise<void> {
   if (command === "telegram") return telegramCommand();
+  if (command === "news") {
+    if (loadedWatchlist && "problem" in loadedWatchlist) fail(loadedWatchlist.problem);
+    return reportNews(await checkWatchlist(watchlistDeps()));
+  }
   if (command === "status") return status();
   if (command === "alerts") return listAlerts();
   if (command === "brief") return report(await runMorningBrief(scheduledDeps(), { force: rest.includes("--force") }));

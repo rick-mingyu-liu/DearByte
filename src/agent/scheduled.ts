@@ -66,9 +66,13 @@ async function assess(d: ScheduledDeps, now: Date): Promise<Trigger[]> {
   });
 }
 
+/** What writing a scheduled message needs; news alerts use the same helpers. */
+export type ComposeDeps = Pick<ScheduledDeps, "model" | "tools" | "system" | "timeZone" | "onEvent">;
+export type DeliverDeps = Pick<ScheduledDeps, "store" | "timeZone" | "notify">;
+
 type Composed = { text: string } | { text: null; stop: LoopStop };
 
-async function compose(d: ScheduledDeps, purpose: string, instruction: string, now: Date): Promise<Composed> {
+export async function compose(d: ComposeDeps, purpose: string, instruction: string, now: Date): Promise<Composed> {
   const result = await runAgent({
     model: d.model,
     tools: d.tools,
@@ -84,7 +88,7 @@ export const CAP_NOTICE =
   "I held back a message: this week's model spending reached the cap (DEARBYTE_WEEKLY_CAP). I'll stay quiet until older spending ages out, or you can raise the cap.";
 
 /** When the model couldn't write the message: explains the weekly cap to the user once a day, otherwise just reports. */
-async function unwritten(d: ScheduledDeps, now: Date, c: Composed & { text: null }, triggers: Trigger[]): Promise<Outcome> {
+export async function unwritten(d: DeliverDeps, now: Date, c: Composed & { text: null }, triggers: Trigger[]): Promise<Outcome> {
   if (c.stop !== "weekly_cap") return { sent: false, reason: `the model gave no message (${c.stop})`, triggers };
   const told = d.store.alertsOn(localDate(now, d.timeZone)).some((a) => a.kind === "notice" && a.triggers.includes("weekly_cap"));
   if (told) return { sent: false, reason: "weekly spending cap reached", triggers };
@@ -92,7 +96,7 @@ async function unwritten(d: ScheduledDeps, now: Date, c: Composed & { text: null
 }
 
 /** Stores the message under `kind` with the rules it covers (`raised`, default: the triggers' kinds), then sends it. */
-async function deliver(d: ScheduledDeps, now: Date, kind: string, title: string, text: string, triggers: Trigger[], raised = triggers.map((t) => t.kind as string)): Promise<Outcome> {
+export async function deliver(d: DeliverDeps, now: Date, kind: string, title: string, text: string, triggers: Trigger[], raised = triggers.map((t) => t.kind as string)): Promise<Outcome> {
   const id = d.store.recordAlert({ at: now.toISOString(), date: localDate(now, d.timeZone), kind, triggers: raised, text, delivered: false });
   // Notices are about DearByte itself, not advice, so they get no rating buttons.
   const delivered = await d.notify(title, text, kind === "notice" ? {} : { alertId: id }).catch(() => false);
@@ -100,7 +104,7 @@ async function deliver(d: ScheduledDeps, now: Date, kind: string, title: string,
   return { sent: true, kind, text, triggers, delivered };
 }
 
-const SCHEDULED = "[Scheduled by DearByte, not a message from the user. Speak to the user directly.]";
+export const SCHEDULED = "[Scheduled by DearByte, not a message from the user. Speak to the user directly.]";
 
 /** Sends a caution when a rule fires that hasn't been raised today. */
 export async function runCautionCheck(d: ScheduledDeps): Promise<Outcome> {
