@@ -316,11 +316,11 @@ async function calendarCommand(): Promise<void> {
   if (!calendar) return console.log("The calendar is off: it needs macOS, and DEARBYTE_CALENDAR not set to off.");
   let access = await calendar.access();
   if (access === "not_determined") {
-    console.log("macOS will ask whether your terminal may access your calendars. DearByte reads titles and times only, skips invites you declined or haven't answered, and sends the titles it uses to your model provider (they can appear in its messages, including Telegram).");
+    console.log("macOS will ask whether DearByte Calendar may access your calendars. DearByte reads titles and times only, skips invites you declined or haven't answered, and sends the titles it uses to your model provider (they can appear in its messages, including Telegram).");
     access = await calendar.requestAccess();
     if (access === "not_determined") {
       return console.log(
-        "No answer from macOS yet. If the dialog is still open (it can hide behind other windows), click Allow, then run this again. If no dialog appeared: System Settings → Privacy & Security → Calendars, turn on your terminal app.",
+        "No answer from macOS yet. If the dialog is still open (it can hide behind other windows), click Allow, then run this again. If no dialog appeared: System Settings → Privacy & Security → Calendars, turn on DearByte Calendar.",
       );
     }
   }

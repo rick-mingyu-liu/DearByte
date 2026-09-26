@@ -6,6 +6,16 @@
 	<string>com.dearbyte.calendar</string>
 	<key>CFBundleName</key>
 	<string>DearByte Calendar</string>
+	<key>CFBundleDisplayName</key>
+	<string>DearByte Calendar</string>
+	<key>CFBundleExecutable</key>
+	<string>dearbyte-calendar</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.0</string>
+	<key>LSUIElement</key>
+	<true/>
 	<key>NSCalendarsFullAccessUsageDescription</key>
 	<string>DearByte reads the titles and times of your events so its morning brief and alerts can take your day into account. It never reads notes or locations, and never changes your calendar. The titles it uses are sent to your model provider with DearByte's requests.</string>
 </dict>

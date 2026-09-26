@@ -1,5 +1,8 @@
 // DearByte calendar helper: reads the Mac's calendars (which iCloud keeps in
-// sync with the iPhone) through EventKit and prints JSON. One command per run:
+// sync with the iPhone) through EventKit and prints JSON. It runs as a small
+// app, DearByte Calendar.app (built by src/calendar/mac.ts and started with
+// `open`), so macOS asks for calendar access for DearByte Calendar itself,
+// whichever terminal or background service runs DearByte. One command per run:
 //
 //   dearbyte-calendar status               → whether DearByte may read calendars
 //   dearbyte-calendar access               → asks macOS for access (shows the system prompt once)
