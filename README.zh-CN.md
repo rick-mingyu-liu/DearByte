@@ -133,8 +133,7 @@ npm run typecheck
 | [中文使用指南](docs/guide.zh-CN.md) | 安装、微信接入、常用配置与控制 |
 | [完整运行参考（英文）](docs/guide.en.md) | 全部命令、主动消息规则、通知、配置和目录结构 |
 | [工作原理（英文）](docs/how-it-works.md) | 回复生成、记忆和存储 |
-| [项目计划（英文）](docs/plan.md) | 决策、进展和里程碑 |
-| [改进方向（英文）](docs/improvements.md) | 后续可以改进的地方 |
+| [路线图（英文）](README.md#roadmap) | 接下来要做的事 |
 | [参与贡献（英文）](CONTRIBUTING.md) | 提 PR 前请先看；安全问题见 [SECURITY.md](SECURITY.md) |
 
 ## 致谢

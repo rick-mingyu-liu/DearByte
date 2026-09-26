@@ -2,9 +2,9 @@
 
 # DearByte · 小拜 — Operations guide
 
-A Chinese-speaking AI companion, 小拜 (傲娇但细心, a tsundere girl), with persistent memory. It's built for a Douyin demo in which you chat with it in WeChat.
+This guide covers 小拜, DearByte's Chinese companion mode (傲娇但细心, a tsundere girl) with persistent memory, in the terminal or WeChat. For the personal agent, see the [README](../README.md).
 
-**Status** ([full plan](plan.md)):
+**Status** ([roadmap](../README.md#roadmap)):
 - The companion works in a terminal simulator.
 - 小拜 runs on **a real WeChat account with its own name and avatar**. WeChat for Mac, logged in as 小拜, is driven through macOS Accessibility. Text and photos were tested live on 2026-09-24. See [the transport notes](design/wechat-transport.md) for how it works and the risks.
 - It remembers facts, how you want it to talk, and a rolling summary of older chat. It sometimes writes first (good mornings, luck on exam days, check-ins), and it checks every message for crisis signals.
@@ -191,9 +191,6 @@ src/model/               provider clients (OpenAI-compatible, Anthropic), spendi
 tools/bakeoff.ts         persona bake-off
 tools/inspect-wechat.swift  read-only WeChat accessibility probe
 docs/how-it-works.md     start here: how the whole system works
-docs/plan.md             plan: decisions, status, milestones
-docs/improvements.md     what could be better, in rough order
-docs/film/shot-list.md   the 30-second video, shot by shot
 docs/                    provenance and design notes
 ```
 
