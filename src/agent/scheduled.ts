@@ -4,14 +4,15 @@
 //
 // Limits, all in code: no messages in quiet hours (23:00–07:00), at most
 // MAX_CAUTIONS_PER_DAY cautions, each rule at most once a day, and one brief a
-// day. Every message is stored in agent_alerts before it is sent.
+// day. Every message is stored in agent_alerts before it is sent. When the
+// weekly spending cap stops the model, a fixed notice says so, once a day.
 
 import { localDate, localMinutes } from "../companion/time.ts";
 import { baseline, baselineStart, recordSnapshot } from "../health/daily.ts";
 import { cautionTriggers, type Trigger } from "../health/caution.ts";
 import type { HealthMcpClient } from "../health/mcp-client.ts";
 import type { Store } from "../storage/store.ts";
-import { runAgent, type LoopEvent } from "./loop.ts";
+import { runAgent, type LoopEvent, type LoopStop } from "./loop.ts";
 import type { AgentModel } from "./model.ts";
 import { withCurrentTime } from "./persona.ts";
 import type { ToolRegistry } from "./tools.ts";
@@ -22,8 +23,8 @@ export const MAX_CAUTIONS_PER_DAY = 3;
 /** Vital readings older than this don't count as today's. */
 const VITAL_MAX_AGE_HOURS = 24;
 
-/** Delivers a message; resolves to whether it reached the user. */
-export type Notify = (title: string, body: string) => Promise<boolean>;
+/** Delivers a message; resolves to whether it reached the user. `alertId` lets the channel offer feedback buttons. */
+export type Notify = (title: string, body: string, o?: { alertId?: number }) => Promise<boolean>;
 
 export type ScheduledDeps = {
   bridge: Pick<HealthMcpClient, "callTool">;
@@ -65,7 +66,9 @@ async function assess(d: ScheduledDeps, now: Date): Promise<Trigger[]> {
   });
 }
 
-async function compose(d: ScheduledDeps, purpose: string, instruction: string, now: Date): Promise<string | null> {
+type Composed = { text: string } | { text: null; stop: LoopStop };
+
+async function compose(d: ScheduledDeps, purpose: string, instruction: string, now: Date): Promise<Composed> {
   const result = await runAgent({
     model: d.model,
     tools: d.tools,
@@ -74,12 +77,25 @@ async function compose(d: ScheduledDeps, purpose: string, instruction: string, n
     purpose,
     onEvent: d.onEvent,
   });
-  return result.stop === "done" && result.text ? result.text : null;
+  return result.stop === "done" && result.text ? { text: result.text } : { text: null, stop: result.stop };
 }
 
-async function deliver(d: ScheduledDeps, now: Date, kind: string, title: string, text: string, triggers: Trigger[]): Promise<Outcome> {
-  const id = d.store.recordAlert({ at: now.toISOString(), date: localDate(now, d.timeZone), kind, triggers: triggers.map((t) => t.kind), text, delivered: false });
-  const delivered = await d.notify(title, text).catch(() => false);
+export const CAP_NOTICE =
+  "I held back a message: this week's model spending reached the cap (DEARBYTE_WEEKLY_CAP). I'll stay quiet until older spending ages out, or you can raise the cap.";
+
+/** When the model couldn't write the message: explains the weekly cap to the user once a day, otherwise just reports. */
+async function unwritten(d: ScheduledDeps, now: Date, c: Composed & { text: null }, triggers: Trigger[]): Promise<Outcome> {
+  if (c.stop !== "weekly_cap") return { sent: false, reason: `the model gave no message (${c.stop})`, triggers };
+  const told = d.store.alertsOn(localDate(now, d.timeZone)).some((a) => a.kind === "notice" && a.triggers.includes("weekly_cap"));
+  if (told) return { sent: false, reason: "weekly spending cap reached", triggers };
+  return deliver(d, now, "notice", "DearByte", CAP_NOTICE, triggers, ["weekly_cap"]);
+}
+
+/** Stores the message under `kind` with the rules it covers (`raised`, default: the triggers' kinds), then sends it. */
+async function deliver(d: ScheduledDeps, now: Date, kind: string, title: string, text: string, triggers: Trigger[], raised = triggers.map((t) => t.kind as string)): Promise<Outcome> {
+  const id = d.store.recordAlert({ at: now.toISOString(), date: localDate(now, d.timeZone), kind, triggers: raised, text, delivered: false });
+  // Notices are about DearByte itself, not advice, so they get no rating buttons.
+  const delivered = await d.notify(title, text, kind === "notice" ? {} : { alertId: id }).catch(() => false);
   if (delivered) d.store.markAlertDelivered(id);
   return { sent: true, kind, text, triggers, delivered };
 }
@@ -99,14 +115,14 @@ export async function runCautionCheck(d: ScheduledDeps): Promise<Outcome> {
   const fresh = triggers.filter((t) => !raised.has(t.kind));
   if (!fresh.length) return { sent: false, reason: "already raised today", triggers };
 
-  const text = await compose(
+  const c = await compose(
     d,
     "caution_alert",
     `${SCHEDULED}\nThese checks fired:\n${fresh.map((t) => `- ${t.detail}`).join("\n")}\nWrite one short caution message (2-4 sentences): what you noticed, with the numbers, and one concrete suggestion for today. Check other tools if they help. No greeting.`,
     now,
   );
-  if (!text) return { sent: false, reason: "the model gave no message", triggers };
-  return deliver(d, now, "caution", "DearByte", `${text}\n\n(Why: ${fresh.map((t) => t.kind.replaceAll("_", " ")).join(", ")})`, fresh);
+  if (c.text === null) return unwritten(d, now, c, triggers);
+  return deliver(d, now, "caution", "DearByte", `${c.text}\n\n(Why: ${fresh.map((t) => t.kind.replaceAll("_", " ")).join(", ")})`, fresh);
 }
 
 /** Sends the morning brief once a day; `force` sends it anyway (for testing and demos). */
@@ -115,7 +131,7 @@ export async function runMorningBrief(d: ScheduledDeps, o: { force?: boolean } =
   const date = localDate(now, d.timeZone);
   if (!o.force && d.store.alertsOn(date).some((a) => a.kind === "morning_brief")) return { sent: false, reason: "already sent today", triggers: [] };
   const triggers = await assess(d, now);
-  const text = await compose(
+  const c = await compose(
     d,
     "morning_brief",
     `${SCHEDULED}\nWrite the user's morning brief. Check their sleep and vitals with your tools, and memory for anything happening today. ${
@@ -123,9 +139,9 @@ export async function runMorningBrief(d: ScheduledDeps, o: { force?: boolean } =
     }Format: 3-6 short lines, plain text. Sleep against their usual first, then anything worth watching, then one suggestion for the day.`,
     now,
   );
-  if (!text) return { sent: false, reason: "the model gave no message", triggers };
+  if (c.text === null) return unwritten(d, now, c, triggers);
   // Rules covered in the brief count as raised, so no separate caution repeats them today.
-  return deliver(d, now, "morning_brief", "DearByte morning brief", text, triggers);
+  return deliver(d, now, "morning_brief", "DearByte morning brief", c.text, triggers);
 }
 
 /** One tick of the background loop: the brief when it's due, otherwise a caution check. */

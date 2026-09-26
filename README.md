@@ -40,10 +40,10 @@ DearByte is early and built in the open. What works today and what's coming:
 | Spending controls: per-run and weekly caps, a usage log of every model call | **Works** |
 | English persona, plus the opt-in Chinese Xiaobai pack | **Works** |
 | Chat companion in the terminal and in WeChat (Xiaobai, Chinese) with memory and proactive check-ins | **Works**, see [the companion](#the-chinese-companion-xiaobai) |
-| Apple Watch and Apple Health data, through [dearbyte-bridge](https://github.com/dearbyte-labs/dearbyte-bridge) | **In progress** |
+| Apple Watch and Apple Health data, through [dearbyte-bridge](https://github.com/dearbyte-labs/dearbyte-bridge) | **Works** with the bridge's test data; the iPhone setup is next |
 | Calendar awareness (Apple Calendar, via the same iPhone app) | Planned |
-| Caution alerts and a morning brief that combine sleep, heart data and your schedule | Planned |
-| Telegram for alerts and Approve/Reject buttons | Planned |
+| Caution alerts and a morning brief, judged against your own normal sleep, resting heart rate and HRV | **Works**; the calendar part waits for calendar awareness |
+| Telegram for alerts, a 👍/👎 on every alert, and Approve/Reject buttons | **Works** |
 | Company watchlist: official newsroom feeds and SEC filings | Planned |
 | Testnet wallet: the agent proposes a paid service, you approve, it pays within a cap, and you get a receipt | Planned |
 
@@ -51,10 +51,10 @@ DearByte is early and built in the open. What works today and what's coming:
 
 **Phase 1: the first demo** (target: 2026-09-28)
 - [x] Agent core: tool loop, Claude/DeepSeek tiers, spending caps, usage log, English persona
-- [ ] Apple Watch and Apple Health data through [dearbyte-bridge](https://github.com/dearbyte-labs/dearbyte-bridge), and `npm run agent` on real data
-- [ ] Daily health snapshots, so DearByte learns your normal sleep, resting heart rate and HRV
-- [ ] Caution alerts and a morning brief that combine your body and your calendar, with quiet hours and a daily limit
-- [ ] Telegram for alerts, and Approve/Reject buttons
+- [x] Apple Watch and Apple Health data through [dearbyte-bridge](https://github.com/dearbyte-labs/dearbyte-bridge), and `npm run agent`
+- [x] Daily health snapshots, so DearByte learns your normal sleep, resting heart rate and HRV
+- [x] Caution alerts and a morning brief, with quiet hours and a daily limit (calendar comes in Phase 2)
+- [x] Telegram for alerts, and Approve/Reject buttons
 - [ ] Company watchlist: official newsroom feeds and SEC filings, with relevance filtered against what you care about
 - [ ] Testnet wallet demo: the agent proposes a paid service, you approve, it pays in test USDC within a cap, and you get a receipt
 
@@ -106,8 +106,21 @@ All settings go in `.env`.
 | `DEARBYTE_WORKER` | `deepseek:deepseek-flash` | The model for high-volume, easy-to-check work: filtering, summaries |
 | `DEARBYTE_PERSONA` | `default` | `default` (English DearByte) or `xiaobai` (Chinese) |
 | `DEARBYTE_WEEKLY_CAP` | `5` | USD the agent may spend on model calls in any 7 days; `0` turns the cap off |
+| `HEALTH_MCP_URL` | — | Your dearbyte-bridge MCP address. It contains a secret, so treat it like a password |
+| `TELEGRAM_BOT_TOKEN` | — | Your bot's token from @BotFather. Secret: whoever has it controls the bot |
+| `TELEGRAM_CHAT_ID` | — | Your chat with the bot; `npm run agent -- telegram` finds it. Only this chat can use the buttons |
 
 A model without a known price is refused, so the spending caps always work.
+
+### Telegram
+
+Terminal first; Telegram is where DearByte reaches you when you're away from it. It sends briefs and alerts, each with 👍 Useful / 👎 Not useful buttons (the ratings show up in `npm run agent -- status`, so alert precision is measured, not guessed), and anything that needs your yes comes with ✅ Approve / ❌ Reject.
+
+1. Message @BotFather in Telegram, send `/newbot`, and put the token in `.env` as `TELEGRAM_BOT_TOKEN`.
+2. Send your bot any message, then run `npm run agent -- telegram`. It prints your chat id; add it as `TELEGRAM_CHAT_ID`.
+3. Run `npm run agent -- telegram` again. It sends a test approval; tap a button to check it works.
+
+Button taps are handled while `npm run agent -- watch` runs. Approval requests expire after 15 minutes, each is decided once, and messages or taps from any other chat are ignored.
 
 ## How it works
 
