@@ -82,8 +82,8 @@ export async function proposePurchase(d: WalletDeps, p: { url: string; reason: s
   const sent = d.sendApproval ? await d.sendApproval(approval).catch(() => false) : false;
   return [
     `Proposed purchase #${approval.id} for ${formatUsd(amount)} (the seller describes it as: "${description}"). Nothing is paid unless the user approves within 15 minutes.`,
-    sent ? "The approval request is in their Telegram." : "Telegram isn't available for this, so only the terminal works.",
-    `They can also approve in the terminal: /approve ${approval.id} in chat, or npm run agent -- approve ${approval.id}.`,
+    sent ? "The request with Approve/Reject buttons is in their Telegram." : "Telegram isn't set up, so they answer in the terminal.",
+    "DearByte has already shown them the request and how to answer it, so don't explain how to approve.",
     "Tell the user what you proposed and why, and that it waits for their approval. Don't say it was bought.",
   ]
     .filter(Boolean)
@@ -112,10 +112,10 @@ export function purchaseHandler(d: WalletDeps): ApprovalHandler {
       if (!paid.tx) {
         // Delivered, but no transaction to prove it: counted as spent, because a real seller could still settle it.
         const receipt = d.store.finishPurchase(reserved.id, { status: "unconfirmed", result: paid.result });
-        return `The seller delivered ${description} for a signed ${formatUsd(amount)} payment, but sent no transaction, so the payment can't be confirmed. Receipt #${receipt.id} (unconfirmed). A dev-mode seller never settles, so no money moves with one.`;
+        return `The seller delivered "${description}" for a signed ${formatUsd(amount)} payment, but sent no transaction, so the payment can't be confirmed. Receipt #${receipt.id} (unconfirmed). A dev-mode seller never settles, so no money moves with one.`;
       }
       const receipt = d.store.finishPurchase(reserved.id, { status: "paid", tx: paid.tx, result: paid.result });
-      return `Paid ${formatUsd(amount)} for ${description}. Receipt #${receipt.id}, transaction ${EXPLORER_TX}${paid.tx}.`;
+      return `Paid ${formatUsd(amount)} for "${description}". Receipt #${receipt.id}, transaction ${EXPLORER_TX}${paid.tx}.`;
     } catch (err) {
       const message = err instanceof PaymentError ? err.message : `the payment failed: ${(err as Error).message}`;
       if (err instanceof PaymentError && err.signatureSent) {

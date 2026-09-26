@@ -149,6 +149,9 @@ test("read_memory reports what is remembered, or that memory is off", async () =
   const source = store.addMessage("user", "I have a half marathon on Oct 12");
   store.upsertFact({ category: "event", key: "half_marathon", value: "Running a half marathon", eventDate: "2026-10-12", evidence: "half marathon on Oct 12" }, source);
   expect(JSON.parse(await readMemory.run({}))).toMatchObject({ status: "ok", facts: [{ category: "event", fact: "Running a half marathon", date: "2026-10-12" }] });
+  // The companion's style facts (nicknames, language) set 小拜's voice and never reach the agent.
+  store.upsertFact({ category: "style", key: "nickname", value: "Call the user 宝宝", eventDate: null, evidence: "叫我宝宝" }, source);
+  expect(JSON.parse(await readMemory.run({})).facts.map((f: { category: string }) => f.category)).toEqual(["event"]);
 });
 
 test("health tools are offered only when HEALTH_MCP_URL is set", () => {

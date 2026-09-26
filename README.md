@@ -101,6 +101,8 @@ npm run agent -- chat       # talk to it; tools appear as you set them up
 npm run agent -- watch      # always on: morning brief, caution alerts, news
 ```
 
+To see all of it at once, `npm run demo` runs the three parts in order: a morning brief, a news check and an approved purchase. It uses your real setup where you have one, and sample data where you don't.
+
 The [agent guide](docs/agent-guide.md) walks through setting up health, Telegram, the watchlist and the wallet in order, and has a checklist for testing each one live.
 
 ## Configuration
