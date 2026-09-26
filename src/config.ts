@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { resolveTiers, type Tier, type TierSettings } from "./agent/tiers.ts";
 import { resolveModel, type ModelSettings } from "./model/providers.ts";
 
 export const ROOT = new URL("..", import.meta.url).pathname;
@@ -7,6 +8,8 @@ export const ROOT = new URL("..", import.meta.url).pathname;
 export type Config = {
   /** Which provider, model, key and prices; or what's missing from .env. */
   model: ModelSettings | { problem: string };
+  /** The agent's brain and worker models; or what's missing from .env. */
+  agent: Record<Tier, TierSettings> | { problem: string };
   dbPath: string;
   timeZone: string;
   historyMessages: number;
@@ -39,6 +42,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const merged = { ...readDotEnv(join(ROOT, ".env")), ...env };
   return {
     model: resolveModel(merged),
+    agent: resolveTiers(merged),
     dbPath: merged.COMPANION_DB || join(ROOT, "data/companion.sqlite"),
     timeZone: merged.COMPANION_TZ || Intl.DateTimeFormat().resolvedOptions().timeZone,
     historyMessages: Number(merged.COMPANION_HISTORY_MESSAGES || 40),
