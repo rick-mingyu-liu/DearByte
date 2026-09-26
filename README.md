@@ -158,8 +158,7 @@ The WeChat connection drives WeChat for Mac through macOS Accessibility. That is
 | --- | --- |
 | [Operations guide](docs/guide.en.md) | Companion commands, proactive messaging, alerts, configuration, repository layout |
 | [How it works](docs/how-it-works.md) | The companion's reply pipeline, memory and storage |
-| [Project plan](docs/plan.md) | Decisions, progress and milestones |
-| [Improvements](docs/improvements.md) | Areas for future work |
+| [Roadmap](#roadmap) | What's next: the first demo, daily use, then hosting and the marketplace |
 | [中文说明](README.zh-CN.md) | 小拜的中文介绍和快速开始 |
 | [Contributing](CONTRIBUTING.md) | Read before opening a PR; report security issues through [SECURITY.md](SECURITY.md) |
 
