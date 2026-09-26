@@ -1,0 +1,148 @@
+<p align="center"><strong>简体中文</strong> · <a href="README.md">English</a></p>
+
+> 这是 DearByte 的中文说明，介绍小拜（中文陪伴模式）。项目主页和个人助理功能见 [English README](README.md)。
+
+<h1 align="center">DearByte · 小拜</h1>
+
+<p align="center"><strong>有点嘴硬，但会把你的话放在心上。</strong></p>
+
+<p align="center">一个有自己脾气的 AI 聊天伙伴。<br>记住你说过的小事，偶尔主动问候，也尊重你想安静的时候。</p>
+
+<p align="center">
+<a href="https://github.com/dearbyte-labs/DearByte/stargazers"><img src="https://img.shields.io/github/stars/dearbyte-labs/DearByte?style=flat" alt="GitHub Stars"></a>
+<img src="https://img.shields.io/badge/status-experimental-orange" alt="实验原型">
+<img src="https://img.shields.io/badge/Node.js-26%2B-339933" alt="Node.js 26+">
+<a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT"></a>
+</p>
+
+<p align="center"><a href="#快速开始">快速开始</a> · <a href="docs/guide.zh-CN.md">使用指南</a> · <a href="#数据与隐私">数据与隐私</a> · <a href="#参与开发">参与开发</a></p>
+
+小拜有点傲娇，也很细心。她会接你的玩笑，认真听你说烦心事；开启记忆后，还能记住你提过的偏好和日程，让下一次聊天接得上上一次。
+
+DearByte 目前是一个可以在终端运行、也可以实验性接入微信的 AI 陪伴原型。文档提供简体中文与英文两个版本；**当前角色和对话设计以中文为主**。
+
+如果你也喜欢这样的聊天伙伴，欢迎点个 ⭐ Star，回来看看小拜的新变化。
+
+## 和小拜聊点什么
+
+| 你想要的体验 | 小拜现在能做什么 |
+| --- | --- |
+| 下班后随便聊两句 | 用简短、有个性的消息回应，支持分条发送和自然的回复间隔 |
+| 下次不用从头交代 | 开启长期记忆后，记住有原话依据的小事，并整理较早的对话 |
+| 有人记得重要的一天 | 开启记忆和主动消息后，可在记住的考试、面试等事件当天问候 |
+| 分享今天拍的照片 | 支持图片对话；微信模式需要额外配置本地图片目录 |
+| 偶尔收到一句问候 | 支持早安、久未聊天的问候和日常主动消息，也有限频与安静时段 |
+| 今天想一个人待着 | 可以关闭主动消息；表达想安静时，会暂停主动问候 3 天 |
+| 自己决定留下什么 | 查看、删除、导出记忆，或关闭长期记忆；长期记忆默认关闭 |
+
+## 快速开始
+
+需要 **Node.js 26+**（用 nvm 的话，在项目目录里 `nvm use` 即可）。先在终端认识小拜：
+
+```bash
+git clone https://github.com/dearbyte-labs/DearByte.git
+cd DearByte
+npm install
+```
+
+在项目根目录创建 `.env`，填入你的 API 密钥（该文件已被 Git 忽略）：
+
+```dotenv
+DEEPSEEK_API_KEY=你的_API_密钥
+```
+
+也可以换成 OpenAI、Claude、Gemini、通义千问、Kimi、GLM、OpenRouter 或本地 Ollama，见[使用指南的配置](docs/guide.zh-CN.md#配置)。每条回复默认最多花 1 美元。
+
+```bash
+npm run companion
+```
+
+没有密钥也可以运行 `npm run companion -- --fake`，检查本地流程。该模式不调用模型，回复会标注为模拟内容。
+
+| 命令 | 作用 |
+| --- | --- |
+| `/memory on` / `/memory off` | 开启或关闭长期记忆 |
+| `/memory` | 查看记忆 |
+| `/memory forget <id>` | 删除一条记忆 |
+| `/memory export` | 导出记忆 |
+| `/img <path> [配文]` | 发送本地图片 |
+| `/history clear` | 清除聊天历史，保留记忆 |
+| `/help` / `/quit` | 查看帮助 / 退出 |
+
+### 在微信里聊天
+
+微信接入通过 macOS 辅助功能操作桌面客户端，当前针对 **WeChat for Mac 4.x（或 3.8.4）、英文界面、单个一对一聊天**。4.x 下看图需要“屏幕与系统录音”权限。需要辅助功能权限和 Swift；图片另需配置目录。
+
+这是一条实验性演示路径，存在账号受限风险。请使用测试账号。配置步骤、草稿模式、暂停与恢复见[中文使用指南](docs/guide.zh-CN.md#微信接入)。
+
+#### 设置联系人白名单
+
+在登录小拜账号的 Mac 微信中，打开希望小拜回复的一对一聊天。将聊天顶部显示的完整名称填入命令（不是微信号）：
+
+```bash
+npm run dearbyte -- --chat "Alex Zhang" --draft
+```
+
+首次运行会核对当前聊天名称，并创建 `data/contacts.json`。草稿模式只生成回复，不发送；确认设置正确后，退出程序，再启动自动回复：
+
+```bash
+npm run dearbyte
+```
+
+如果同一联系人有不同的备注或昵称，编辑 `data/contacts.json`，把可能显示的名称加入 `names`：
+
+```json
+{
+  "contacts": [
+    {
+      "id": "me",
+      "names": ["张三", "Alex Zhang"]
+    }
+  ]
+}
+```
+
+将示例名称替换为**同一个人**的实际显示名称，`id` 保留 `me` 即可。保存后重启程序。文件已存在时，`--chat` 不会追加或覆盖名单，需要直接编辑文件。
+
+**当前仅支持一个联系人。** 不要把不同的人填成别名，也不要添加第二个联系人对象；历史与记忆尚未按联系人隔离。该文件已被 Git 忽略。更多说明见[联系人设置指南](docs/guide.zh-CN.md#设置允许回复的联系人)。
+
+## 数据与隐私
+
+- **长期记忆默认关闭。** 开启后可随时查看、删除或导出。聊天历史与长期记忆是两回事，关闭记忆不会停止保存聊天历史。
+- **本地保存，云端生成。** 历史、记忆、摘要和设置保存在被 Git 忽略的 `data/` 中。生成回复时，相关对话上下文会发送给你配置的模型服务商（默认 DeepSeek）；图片仅用于当前轮次。
+- **历史默认保留 30 天。** 开启记忆时，较早的聊天先纳入摘要再删除。清除历史不会同时清除记忆。
+- **微信仍由腾讯传输。** 删除本地数据不会删除已经发出的微信消息，也不会删除模型服务商可能保留的数据。
+
+## 当前进展
+
+已实现终端聊天、可控记忆、图片输入、主动消息和实验性微信接入。微信文字与图片流程已于 **2026-09-24** 完成实机测试。
+
+当前微信模式只支持一个联系人；语音、视频、文件和表情包不能被直接理解。小拜是 AI，不是真人；危机信号检测用于调整回复，不能代替专业帮助或联系紧急服务。
+
+## 参与开发
+
+```bash
+npm test
+npm run typecheck
+```
+
+欢迎通过 [Issues](https://github.com/dearbyte-labs/DearByte/issues) 反馈问题、讨论想法，或提交改进。复现问题时请去掉聊天中的个人信息和 API 密钥。
+
+| 文档 | 内容 |
+| --- | --- |
+| [中文使用指南](docs/guide.zh-CN.md) | 安装、微信接入、常用配置与控制 |
+| [完整运行参考（英文）](docs/guide.en.md) | 全部命令、主动消息规则、通知、配置和目录结构 |
+| [工作原理（英文）](docs/how-it-works.md) | 回复生成、记忆和存储 |
+| [项目计划（英文）](docs/plan.md) | 决策、进展和里程碑 |
+| [改进方向（英文）](docs/improvements.md) | 后续可以改进的地方 |
+| [参与贡献（英文）](CONTRIBUTING.md) | 提 PR 前请先看；安全问题见 [SECURITY.md](SECURITY.md) |
+
+## 致谢
+
+小拜的对话设计参考了 [狗头军师](https://github.com/shengjidaguai-china/goutoujunshi)、[咫尺](https://github.com/oaa529/zhichi) 和 [前任.skill](https://github.com/perkfly/ex-skill) 的部分思路。具体来源、采用方式和差异见[来源说明（英文）](docs/upstream-provenance.md)。
+
+## 许可证
+
+[MIT](LICENSE)。借鉴的上游项目也都是 MIT 许可，来源和改编方式见[来源说明（英文）](docs/upstream-provenance.md)。
+
+本项目通过非官方方式操作微信，不符合腾讯的使用规则，账号可能被限制。仅供个人实验，请使用测试账号，不要用主账号运行。
