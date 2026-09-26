@@ -19,7 +19,18 @@ const TIMEOUT_MS = 30_000;
 /** How much of a bought resource is kept. */
 export const MAX_RESULT = 20_000;
 
-export class PaymentError extends Error {}
+/** How long a signed authorization may stay valid; a seller can't ask for longer. */
+export const MAX_AUTH_SECONDS = 300;
+
+export class PaymentError extends Error {
+  constructor(
+    message: string,
+    /** True once a signed authorization has gone to the seller: it may still be charged. */
+    readonly signatureSent = false,
+  ) {
+    super(message);
+  }
+}
 
 export type Quote = {
   /** The seller's description of what it sells at this URL. */
@@ -50,11 +61,20 @@ export async function quote(url: string, f: typeof fetch = fetch): Promise<Quote
   } catch (err) {
     throw new PaymentError(`the seller's price couldn't be read: ${(err as Error).message}`);
   }
-  // Only the exact scheme in test USDC on Base Sepolia; anything else (mainnet, another token) is refused.
+  // Only the exact scheme in test USDC on Base Sepolia, paid by a plain EIP-3009 transfer authorization
+  // (not Permit2, which would sign a token approval), valid for at most MAX_AUTH_SECONDS.
   const accept = (paymentRequired.accepts as PaymentRequirements[]).find(
-    (a) => a.scheme === "exact" && a.network === NETWORK && a.asset.toLowerCase() === USDC.toLowerCase() && /^\d+$/.test(a.amount),
+    (a) =>
+      a.scheme === "exact" &&
+      a.network === NETWORK &&
+      a.asset.toLowerCase() === USDC.toLowerCase() &&
+      /^\d{1,18}$/.test(a.amount) &&
+      (a.extra?.assetTransferMethod === undefined || a.extra.assetTransferMethod === "eip3009"),
   );
-  if (!accept) throw new PaymentError("the seller doesn't accept test USDC on Base Sepolia");
+  if (!accept) throw new PaymentError("the seller doesn't accept test USDC on Base Sepolia by transfer authorization");
+  if (!(accept.maxTimeoutSeconds > 0 && accept.maxTimeoutSeconds <= MAX_AUTH_SECONDS)) {
+    throw new PaymentError(`the seller wants the payment valid for ${accept.maxTimeoutSeconds}s; DearByte allows at most ${MAX_AUTH_SECONDS}s`);
+  }
   const resource = (paymentRequired as { resource?: { description?: string } }).resource;
   return { description: resource?.description?.trim() || "(no description)", accept, paymentRequired };
 }
@@ -78,19 +98,26 @@ export async function pay(terms: Terms, key: `0x${string}`, f: typeof fetch = fe
   if (BigInt(a.amount) > BigInt(terms.amount)) throw new PaymentError("the seller raised the price since you approved; nothing was paid");
 
   const client = new x402HTTPClient(new x402Client().register(NETWORK, new ExactEvmScheme(privateKeyToAccount(key))));
-  // Sign for the one approved offer only.
-  const payload = await client.createPaymentPayload({ ...fresh.paymentRequired, accepts: [a] } as PaymentRequired);
-  const res = await request(terms.url, client.encodePaymentSignatureHeader(payload), f);
-  const text = (await res.text()).slice(0, MAX_RESULT);
-  if (!res.ok) throw new PaymentError(`the seller refused the payment (HTTP ${res.status})${text ? `: ${text.slice(0, 200)}` : ""}`);
+  // Sign for the one approved offer only, with no extensions (they can add more to sign).
+  const { extensions: _, ...required } = fresh.paymentRequired as PaymentRequired & { extensions?: unknown };
+  const payload = await client.createPaymentPayload({ ...required, accepts: [a] } as PaymentRequired);
+  // From here on the seller holds a signed authorization, so every failure says so.
+  let res: Response;
+  try {
+    res = await request(terms.url, client.encodePaymentSignatureHeader(payload), f);
+  } catch (err) {
+    throw new PaymentError((err as Error).message, true);
+  }
+  const text = (await res.text().catch(() => "")).slice(0, MAX_RESULT);
+  if (!res.ok) throw new PaymentError(`the seller answered HTTP ${res.status} to the payment`, true);
   let tx: string | null = null;
   try {
     const settle = client.getPaymentSettleResponse((n) => res.headers.get(n));
-    if (!settle.success) throw new PaymentError(`settlement failed: ${settle.errorReason ?? "unknown reason"}`);
+    if (!settle.success) throw new PaymentError(`settlement failed: ${String(settle.errorReason ?? "unknown reason").slice(0, 100)}`, true);
     tx = settle.transaction || null;
   } catch (err) {
     if (err instanceof PaymentError) throw err;
-    // A 200 without a receipt header: the resource came back, but there's no proof of payment.
+    // A 200 without a receipt header: the resource came back, but there's no proof of payment (tx stays null).
   }
   return { tx, result: text, status: res.status };
 }

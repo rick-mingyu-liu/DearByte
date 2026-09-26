@@ -148,8 +148,8 @@ DEARBYTE_SELLERS=http://127.0.0.1:4021 npm run agent -- chat
    - asks the seller its price (the 402 answer);
    - checks the seller allowlist and the per-purchase and daily caps;
    - sends you an approval request.
-2. **You approve** with the button in Telegram, `/approve N` in chat, or `npm run agent -- approve N`. Requests expire after 15 minutes.
-3. **It pays, and you get a receipt.** Code asks for a fresh quote and refuses if the recipient changed or the price went up. It then signs a transfer for exactly the approved amount, gets the resource, and keeps the receipt with its transaction link. `npm run agent -- wallet` shows the balance, limits and recent purchases.
+2. **You approve** with the button in Telegram, `/approve N` in chat, or `npm run agent -- approve N`. You always see the request as code wrote it (price, seller, recipient first), and in the terminal you confirm with "yes". At most 3 requests wait at once, and each expires after 15 minutes.
+3. **It pays, and you get a receipt.** Code asks for a fresh quote and refuses if the recipient changed or the price went up. It then reserves the amount against the daily limit, signs a transfer for exactly the approved amount (valid for at most 5 minutes), gets the resource, and keeps the receipt with its transaction link. If a signed payment goes out but no transaction comes back, the receipt says "unconfirmed" and the amount still counts toward the limit. `npm run agent -- wallet` shows the balance, limits and recent purchases.
 
 The example seller's `--dev` mode checks the signature without touching the chain, so you can demo the whole flow before the faucet. Without `--dev` (and with `SELLER_PAY_TO` set), payments settle on Base Sepolia through the x402.org facilitator. The seller moves to its own repo as the start of the seller SDK.
 

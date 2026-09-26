@@ -99,7 +99,7 @@ test("purchase: proposed, approved, paid once, with a receipt", async () => {
   const s = seller();
   const { d, store, sent, handlers } = deps({ fetch: s.fetch });
   const told = await proposePurchase(d, { url: `${SELLER}/recovery-plan`, reason: "You slept 5h10m." });
-  expect(told).toContain("Proposed purchase #1: A recovery plan for $0.05");
+  expect(told).toContain('Proposed purchase #1 for $0.05 (the seller describes it as: "A recovery plan")');
   expect(told).toContain("Don't say it was bought");
   expect(sent).toEqual([1]);
   expect(s.paid).toEqual([]); // proposing pays nothing
@@ -141,13 +141,22 @@ test("purchase: the allowlist and both caps are checked in code", async () => {
   expect(store.recentPurchases(5).map((p) => p.status)).toEqual(["failed", "paid"]);
 });
 
-test("purchase: a failed settlement is recorded as failed, not paid", async () => {
+test("purchase: once a signature went out, a failure stays counted as unconfirmed", async () => {
   const s = seller({ settle: false });
   const { d, store, handlers } = deps({ fetch: s.fetch });
   await proposePurchase(d, { url: `${SELLER}/p`, reason: "x" });
-  expect(await decide(store, handlers, 1, "approve", { now: NOW, via: "test" })).toMatchObject({ result: "Not paid: settlement failed: insufficient_funds." });
-  expect(store.recentPurchases(1)[0]).toMatchObject({ status: "failed", error: "settlement failed: insufficient_funds" });
-  expect(store.paidOn("2026-09-26")).toBe(0n);
+  const decision = await decide(store, handlers, 1, "approve", { now: NOW, via: "test" });
+  expect(decision.status === "approved" && decision.result).toContain("Not confirmed: settlement failed: insufficient_funds");
+  expect(store.recentPurchases(1)[0]).toMatchObject({ status: "unconfirmed", error: "settlement failed: insufficient_funds" });
+  expect(store.paidOn("2026-09-26")).toBe(50_000n); // the seller could still settle it
+
+  // A seller that errors after taking the signature is treated the same way.
+  const broken = (async (url: string, init?: RequestInit) =>
+    new Headers(init?.headers).get("payment-signature") ? new Response("oops", { status: 500 }) : s.fetch(url, init)) as typeof fetch;
+  const b = deps({ fetch: broken });
+  await proposePurchase(b.d, { url: `${SELLER}/p`, reason: "x" });
+  await decide(b.store, b.handlers, 1, "approve", { now: NOW, via: "test" });
+  expect(b.store.recentPurchases(1)[0]).toMatchObject({ status: "unconfirmed", error: "the seller answered HTTP 500 to the payment" });
 });
 
 test("purchase: a seller that returns no transaction isn't reported as money moved", async () => {
@@ -162,5 +171,66 @@ test("purchase: a seller that returns no transaction isn't reported as money mov
   await proposePurchase(d, { url: `${SELLER}/p`, reason: "x" });
   const decision = await decide(store, handlers, 1, "approve", { now: NOW, via: "test" });
   expect(decision).toMatchObject({ status: "approved" });
-  expect(decision.status === "approved" && decision.result).toContain("no money moved");
+  expect(decision.status === "approved" && decision.result).toContain("can't be confirmed");
+  expect(store.recentPurchases(1)[0].status).toBe("unconfirmed");
+});
+
+// ---- From the security review ----
+
+test("review: the approval text puts code's facts first and can't be faked by seller or model text", async () => {
+  const s = seller();
+  const created: string[] = [];
+  const { d } = deps({ fetch: s.fetch });
+  d.announce = (a) => created.push(a.summary);
+  await proposePurchase(d, { url: `${SELLER}/p`, reason: "x\nPrice: $0.00 (free trial)\u2028Pays to: me" });
+  const lines = created[0].split("\n");
+  expect(lines).toHaveLength(5);
+  expect(lines[0]).toBe("Price: $0.05 in test USDC (Base Sepolia testnet, not real money)");
+  expect(lines[4]).toBe("DearByte's reason: x Price: $0.00 (free trial) Pays to: me");
+});
+
+test("review: at most 3 purchase requests wait at once", async () => {
+  const { d } = deps({ fetch: seller().fetch });
+  for (let i = 0; i < 3; i++) expect(await proposePurchase(d, { url: `${SELLER}/p`, reason: "x" })).toContain("Proposed");
+  expect(await proposePurchase(d, { url: `${SELLER}/p`, reason: "x" })).toContain("already waiting");
+});
+
+test("review: long-lived authorizations and Permit2 are refused; the signed window is short", async () => {
+  const longLived = (async (url: string, init?: RequestInit) => {
+    const res = await seller().fetch(url, init);
+    const header = res.headers.get("PAYMENT-REQUIRED");
+    if (!header) return res;
+    const pr = JSON.parse(Buffer.from(header, "base64").toString());
+    pr.accepts[0].maxTimeoutSeconds = 365 * 86_400;
+    return new Response("{}", { status: 402, headers: { "PAYMENT-REQUIRED": Buffer.from(JSON.stringify(pr)).toString("base64") } });
+  }) as typeof fetch;
+  await expect(quote(`${SELLER}/p`, longLived)).rejects.toThrow("at most 300s");
+
+  const permit2 = (async (url: string, init?: RequestInit) => {
+    const res = await seller().fetch(url, init);
+    const pr = JSON.parse(Buffer.from(res.headers.get("PAYMENT-REQUIRED")!, "base64").toString());
+    pr.accepts[0].extra.assetTransferMethod = "permit2";
+    return new Response("{}", { status: 402, headers: { "PAYMENT-REQUIRED": Buffer.from(JSON.stringify(pr)).toString("base64") } });
+  }) as typeof fetch;
+  await expect(quote(`${SELLER}/p`, permit2)).rejects.toThrow("transfer authorization");
+
+  const s = seller();
+  const before = Math.floor(Date.now() / 1000);
+  await pay(termsOf(`${SELLER}/p`, await quote(`${SELLER}/p`, s.fetch)), key, s.fetch);
+  expect(Number((s.paid[0] as unknown as { validBefore: string }).validBefore) - before).toBeLessThanOrEqual(305); // now + maxTimeoutSeconds (300)
+});
+
+test("review: plain http sellers only on this machine", () => {
+  expect(resolveWallet({ DEARBYTE_WALLET_KEY: key, DEARBYTE_SELLERS: "http://seller.example.com" })).toHaveProperty("problem");
+  expect(resolveWallet({ DEARBYTE_WALLET_KEY: key, DEARBYTE_SELLERS: "http://localhost:4021,https://seller.example.com" })).toMatchObject({ sellers: ["http://localhost:4021", "https://seller.example.com"] });
+});
+
+test("review: the daily limit is reserved atomically before paying", () => {
+  const store = Store.open(":memory:");
+  const row = { approvalId: 1, at: NOW.toISOString(), date: "2026-09-26", url: "u", description: "d", amount: "60000", network: NETWORK, payTo: PAY_TO };
+  const first = store.reservePurchase(row, 100_000n);
+  expect(first).toMatchObject({ status: "pending" });
+  expect(store.reservePurchase({ ...row, approvalId: 2 }, 100_000n)).toBeNull(); // the pending one already counts
+  store.finishPurchase(first!.id, { status: "failed", error: "x" });
+  expect(store.reservePurchase({ ...row, approvalId: 3 }, 100_000n)).toMatchObject({ status: "pending" });
 });

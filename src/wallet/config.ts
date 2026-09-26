@@ -41,11 +41,12 @@ export function formatUsd(units: bigint): string {
   return `$${whole}.${frac}`;
 }
 
-/** The origin of a seller URL, or null when it isn't http(s). */
+/** The origin of a seller URL, or null unless it's https (plain http only on this machine, for a local seller). */
 export function originOf(url: string): string | null {
   try {
     const u = new URL(url);
-    return u.protocol === "https:" || u.protocol === "http:" ? u.origin : null;
+    const local = ["127.0.0.1", "localhost", "[::1]"].includes(u.hostname);
+    return u.protocol === "https:" || (u.protocol === "http:" && local) ? u.origin : null;
   } catch {
     return null;
   }
@@ -59,7 +60,7 @@ export function resolveWallet(env: Record<string, string | undefined>): WalletCo
   const sellers: string[] = [];
   for (const s of (env.DEARBYTE_SELLERS ?? "").split(",").map((s) => s.trim()).filter(Boolean)) {
     const origin = originOf(s);
-    if (!origin) return { problem: `DEARBYTE_SELLERS has something that isn't an http(s) address: ${s}` };
+    if (!origin) return { problem: `DEARBYTE_SELLERS should hold https addresses (plain http only for 127.0.0.1 or localhost): ${s}` };
     sellers.push(origin);
   }
   const perPurchase = toUnits(env.DEARBYTE_MAX_PURCHASE?.trim() || DEFAULT_MAX_PER_PURCHASE);

@@ -28,14 +28,14 @@ import { createTierModels } from "./agent/tiers.ts";
 import { agentToolset } from "./agent/toolset.ts";
 import { WEEK_MS } from "./agent/usage.ts";
 import { runCautionCheck, runMorningBrief, tick, type Notify, type Outcome, type ScheduledDeps } from "./agent/scheduled.ts";
-import { decide, proposeApproval, type ApprovalHandlers } from "./agent/approvals.ts";
+import { approvalText, decide, proposeApproval, type ApprovalHandlers } from "./agent/approvals.ts";
 import { systemNotifier } from "./alerts.ts";
 import { Store } from "./storage/store.ts";
 import { TelegramBot } from "./telegram/bot.ts";
 import { feedbackButtons, pollInbox, sendApproval, type InboxDeps } from "./telegram/inbox.ts";
 import { checkWatchlist, type WatchlistDeps, type WatchOutcome } from "./watchlist/check.ts";
 import { loadWatchlist } from "./watchlist/config.ts";
-import { appendFileSync, readFileSync } from "node:fs";
+import { appendFileSync, chmodSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { createPublicClient, erc20Abi, http } from "viem";
 import { baseSepolia } from "viem/chains";
@@ -84,6 +84,8 @@ const wallet: WalletDeps | null = config.wallet
       store,
       timeZone: config.timeZone,
       sendApproval: telegram ? async (a) => (await sendApproval(telegram.bot, telegram.chatId, a), true) : undefined,
+      // Printed by code, so what you approve is never just the model's retelling.
+      announce: (a) => console.log(`\n── Approval #${a.id} ──\n${approvalText(a)}\nTo answer: /approve ${a.id} or /reject ${a.id} in chat, or npm run agent -- approve ${a.id}\n`),
     }
   : null;
 const { tools, health, bridge } = agentToolset({ store, timeZone: config.timeZone, healthMcpUrl: config.healthMcpUrl, watchlist, wallet });
@@ -334,7 +336,8 @@ async function walletCommand(): Promise<void> {
     if (/^\s*DEARBYTE_WALLET_KEY\s*=/m.test(env)) fail("There's already a DEARBYTE_WALLET_KEY in .env. Remove it first if you really want a new wallet.");
     const key = generatePrivateKey();
     // The key goes straight into .env (ignored by Git) and is never printed.
-    appendFileSync(envPath, `${env && !env.endsWith("\n") ? "\n" : ""}# DearByte testnet wallet (Base Sepolia). Test funds only; never send real money here.\nDEARBYTE_WALLET_KEY=${key}\n`);
+    appendFileSync(envPath, `${env && !env.endsWith("\n") ? "\n" : ""}# DearByte testnet wallet (Base Sepolia). Test funds only; never send real money here.\nDEARBYTE_WALLET_KEY=${key}\n`, { mode: 0o600 });
+    chmodSync(envPath, 0o600); // only you can read the key
     console.log(`Created a testnet wallet and saved its key to .env.\nAddress: ${privateKeyToAccount(key).address}`);
     console.log("Next: get free test USDC at https://faucet.circle.com (network: Base Sepolia), and set DEARBYTE_SELLERS to the sellers you allow.");
     return;
@@ -360,6 +363,16 @@ async function walletCommand(): Promise<void> {
   }
 }
 
+/** Shows the request in code's words and asks for a yes before anything is paid. */
+async function confirmApproval(id: number, ask: (q: string) => Promise<string>): Promise<boolean> {
+  const a = store.approval(id);
+  if (!a || a.status !== "pending") return true; // answerApproval explains
+  console.log(`\n${approvalText(a)}\n`);
+  const yes = /^y(es)?$/i.test((await ask("Approve this? Type yes to confirm: ")).trim());
+  if (!yes) console.log("Not approved. Nothing was done.");
+  return yes;
+}
+
 /** "approve 3" / "reject 3" → the id, or null. */
 function approvalId(arg: string | undefined): number | null {
   const id = Number(arg);
@@ -372,6 +385,11 @@ async function main(): Promise<void> {
   if (command === "approve" || command === "reject") {
     const id = approvalId(rest[0]);
     if (id === null) fail(`Which one? npm run agent -- ${command} N (see npm run agent -- approvals)`);
+    if (command === "approve") {
+      const rl = createInterface({ input: process.stdin, output: process.stdout });
+      const yes = await confirmApproval(id, (q) => rl.question(q)).finally(() => rl.close());
+      if (!yes) return;
+    }
     return answerApproval(id, command);
   }
   if (command === "telegram") return telegramCommand();
@@ -395,15 +413,34 @@ async function main(): Promise<void> {
   console.log(dim(`DearByte · ${tiers.brain.model} · ${health ? "health connected" : "no health data yet"} · /quit to leave${wallet ? ", /approve N or /reject N to answer a purchase" : ""}\n`));
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   let messages: AgentMessage[] = [];
+  /** An approval waiting for the user's "yes". */
+  let confirming: number | null = null;
   rl.setPrompt("you › ");
   rl.prompt();
   for await (const raw of rl) {
     const line = raw.trim();
     if (line === "/quit") break;
     // Approvals are answered by code here, never passed to the model.
+    if (confirming !== null) {
+      const id = confirming;
+      confirming = null;
+      if (/^y(es)?$/i.test(line)) await answerApproval(id, "approve");
+      else console.log("Not approved. Nothing was done.");
+      rl.prompt();
+      continue;
+    }
     const answer = line.match(/^\/(approve|reject)\s+(\d+)$/);
     if (answer) {
-      await answerApproval(Number(answer[2]), answer[1] as "approve" | "reject");
+      const id = Number(answer[2]);
+      const a = store.approval(id);
+      if (answer[1] === "approve" && a?.status === "pending") {
+        // Show code's summary and wait for a yes on the next line.
+        console.log(`\n${approvalText(a)}\n`);
+        console.log("Approve this? Type yes to confirm.");
+        confirming = id;
+      } else {
+        await answerApproval(id, answer[1] as "approve" | "reject");
+      }
       rl.prompt();
       continue;
     }
