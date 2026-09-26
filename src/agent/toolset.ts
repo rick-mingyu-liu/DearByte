@@ -32,8 +32,11 @@ export function memoryTools(store: Pick<Store, "memoryEnabled" | "activeFacts">,
 export function agentToolset(o: { store: Pick<Store, "memoryEnabled" | "activeFacts">; timeZone: string; healthMcpUrl: string | null }): {
   tools: ToolRegistry;
   health: boolean;
+  /** The bridge client, when health is set up. */
+  bridge: HealthMcpClient | null;
 } {
   const tools = [...memoryTools(o.store, o.timeZone)];
-  if (o.healthMcpUrl) tools.push(...healthTools(new HealthMcpClient(o.healthMcpUrl), { timeZone: o.timeZone }));
-  return { tools: new ToolRegistry(tools), health: Boolean(o.healthMcpUrl) };
+  const bridge = o.healthMcpUrl ? new HealthMcpClient(o.healthMcpUrl) : null;
+  if (bridge) tools.push(...healthTools(bridge, { timeZone: o.timeZone }));
+  return { tools: new ToolRegistry(tools), health: Boolean(bridge), bridge };
 }

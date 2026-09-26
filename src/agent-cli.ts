@@ -6,6 +6,10 @@
 //   npm run agent -- ask "How did I sleep?"
 //   npm run agent -- chat
 //   npm run agent -- status
+//   npm run agent -- brief [--force]   the morning brief now
+//   npm run agent -- check             run the caution rules once
+//   npm run agent -- watch             keep running: brief at 07:30, checks every 15 min
+//   npm run agent -- alerts            what DearByte sent on its own lately
 
 import { createInterface } from "node:readline/promises";
 import Anthropic from "@anthropic-ai/sdk";
@@ -17,16 +21,22 @@ import { agentSystemPrompt, withCurrentTime } from "./agent/persona.ts";
 import { createTierModels } from "./agent/tiers.ts";
 import { agentToolset } from "./agent/toolset.ts";
 import { WEEK_MS } from "./agent/usage.ts";
+import { runCautionCheck, runMorningBrief, tick, type Notify, type Outcome, type ScheduledDeps } from "./agent/scheduled.ts";
+import { systemNotifier } from "./alerts.ts";
 import { Store } from "./storage/store.ts";
 
 const USAGE = `Usage:
   npm run agent -- ask "question"   answer one question
   npm run agent -- chat             talk until /quit
-  npm run agent -- status           models, tools, spending`;
+  npm run agent -- status           models, tools, spending
+  npm run agent -- brief [--force]  send the morning brief now
+  npm run agent -- check            run the caution rules once
+  npm run agent -- watch            keep running: brief at 07:30, caution checks every 15 min
+  npm run agent -- alerts           recent briefs and alerts`;
 
 const config = loadConfig();
 const [command, ...rest] = process.argv.slice(2);
-if (!["ask", "chat", "status"].includes(command ?? "")) {
+if (!["ask", "chat", "status", "brief", "check", "watch", "alerts"].includes(command ?? "")) {
   console.log(USAGE);
   process.exit(command ? 1 : 0);
 }
@@ -37,7 +47,7 @@ const tiers = config.agent;
 
 const store = Store.open(config.dbPath);
 const models = createTierModels(tiers, { store, weeklyCap: config.agentWeeklyCap });
-const { tools, health } = agentToolset({ store, timeZone: config.timeZone, healthMcpUrl: config.healthMcpUrl });
+const { tools, health, bridge } = agentToolset({ store, timeZone: config.timeZone, healthMcpUrl: config.healthMcpUrl });
 const system = agentSystemPrompt(ROOT, persona);
 
 function fail(message: string): never {
@@ -100,8 +110,54 @@ function status(): void {
   );
 }
 
+/** For now: the terminal plus a macOS notification. Telegram takes over when it's set up. */
+const notify: Notify = async (title, body) => {
+  console.log(`\n── ${title} ──\n${body}\n`);
+  systemNotifier(config.alertUrl, (m) => console.error(m))(title, body.slice(0, 200));
+  return true;
+};
+
+function scheduledDeps(): ScheduledDeps {
+  if (!bridge) fail("Health isn't set up: add HEALTH_MCP_URL to .env (see dearbyte-bridge docs/SETUP.md).");
+  return { bridge, store, model: models.brain, tools, system, timeZone: config.timeZone, notify, onEvent: (e) => console.log(dim(describeEvent(e))) };
+}
+
+function report(o: Outcome): void {
+  if (!o.sent) console.log(dim(`nothing sent: ${o.reason}${o.triggers.length ? ` (rules: ${o.triggers.map((t) => t.kind).join(", ")})` : ""}`));
+  else if (!o.delivered) console.log("Written, but delivery failed; it's saved in npm run agent -- alerts.");
+}
+
+function listAlerts(): void {
+  const alerts = store.recentAlerts(10);
+  if (!alerts.length) return console.log("Nothing sent yet.");
+  for (const a of alerts.reverse()) {
+    console.log(dim(`${a.at.slice(0, 16).replace("T", " ")} UTC · ${a.kind}${a.triggers.length ? ` · ${a.triggers.join(", ")}` : ""}${a.delivered ? "" : " · not delivered"}`));
+    console.log(`${a.text}\n`);
+  }
+}
+
+const TICK_MS = 15 * 60_000;
+
+async function watch(): Promise<void> {
+  const deps = scheduledDeps();
+  console.log(dim(`Watching: morning brief after 07:30, caution checks every 15 minutes, quiet 23:00-07:00 (${config.timeZone}). Ctrl-C to stop.`));
+  for (;;) {
+    try {
+      report(await tick(deps));
+    } catch (err) {
+      // One failed tick (bridge down, model error) must not stop the loop.
+      console.error(dim(`check failed: ${(err as Error).message}`));
+    }
+    await new Promise((r) => setTimeout(r, TICK_MS));
+  }
+}
+
 async function main(): Promise<void> {
   if (command === "status") return status();
+  if (command === "alerts") return listAlerts();
+  if (command === "brief") return report(await runMorningBrief(scheduledDeps(), { force: rest.includes("--force") }));
+  if (command === "check") return report(await runCautionCheck(scheduledDeps()));
+  if (command === "watch") return watch();
   if (command === "ask") {
     const question = rest.join(" ").trim();
     if (!question) fail('Ask something: npm run agent -- ask "How did I sleep?"');
