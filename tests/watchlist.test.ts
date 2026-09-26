@@ -242,3 +242,57 @@ test("config: missing file, bad JSON and bad fields are told apart", () => {
   writeFileSync(join(dir, "ok.json"), JSON.stringify({ interests: "x", companies: [{ name: "Meta" }] }));
   expect(loadWatchlist(join(dir, "ok.json"))).toEqual({ interests: "x", companies: [{ name: "Meta", feeds: [] }] });
 });
+
+// ---- From review: hostile input, delivery failures, collisions ----
+
+test("feeds: hostile input parses in linear time", () => {
+  const started = performance.now();
+  parseFeed(`<rss>${"<item>".repeat(200_000)}`, "X");
+  parseFeed(`<rss><item><title>${"&lt;".repeat(200_000)}</title><link>https://x.com/a</link><pubDate>${NOW.toUTCString()}</pubDate></item></rss>`, "X");
+  expect(performance.now() - started).toBeLessThan(1_000);
+});
+
+test("feeds: a guid-only item uses the guid as its link; long titles are cut", () => {
+  const xml = `<rss><item><title>${"T".repeat(500)}</title><guid>https://x.com/post/1</guid><pubDate>${NOW.toUTCString()}</pubDate></item></rss>`;
+  const [item] = parseFeed(xml, "X");
+  expect(item.url).toBe("https://x.com/post/1");
+  expect(item.title.length).toBe(201);
+});
+
+test("check: news that failed to reach the user is tried again next check", async () => {
+  const { d, store } = deps({ feed: FEED, worker: screenAs([1, true], [2, false]) });
+  d.notify = async () => false;
+  expect((await checkWatchlist(d)).message).toMatchObject({ sent: true, delivered: false });
+  expect(store.watchItemsWithStatus("relevant")).toHaveLength(1);
+  const retry = deps({ feed: FEED, store, now: new Date(NOW.getTime() + 3_600_000) });
+  expect((await checkWatchlist(retry.d)).message).toMatchObject({ delivered: true });
+  expect(store.watchItemsWithStatus("sent")).toHaveLength(1);
+});
+
+test("store: the same id from two companies is two items, and a claim wins once", () => {
+  const store = Store.open(":memory:");
+  const item = { source: "newsroom", externalId: "1234", title: "t", url: "https://x.com", publishedAt: NOW.toISOString(), summary: "", status: "new" as const };
+  expect(store.addWatchItems([{ ...item, company: "A" }, { ...item, company: "B" }], NOW.toISOString())).toHaveLength(2);
+  expect(store.claimWatchItems([1, 2], "new", "sending")).toEqual([1, 2]);
+  expect(store.claimWatchItems([1, 2], "new", "sending")).toEqual([]);
+});
+
+test("check: a date in the future counts as now; SEC is asked one company at a time", async () => {
+  const future = rss([{ title: "From the future", link: "https://about.fb.com/news/future/", at: new Date(NOW.getTime() + 30 * 86_400_000) }]);
+  const two = { ...WATCHLIST, companies: [...WATCHLIST.companies, { name: "Apple", cik: 320193, feeds: [] }] };
+  const { d, store } = deps({ feed: future, worker: screenAs([1, false]) });
+  let inFlight = 0;
+  let most = 0;
+  const base = d.fetch!;
+  d.watchlist = two;
+  d.fetch = (async (url: string, init?: RequestInit) => {
+    const sec = url.includes("sec.gov");
+    if (sec) most = Math.max(most, ++inFlight);
+    const res = await base(url, init);
+    if (sec) inFlight--;
+    return res;
+  }) as typeof fetch;
+  await checkWatchlist(d);
+  expect(most).toBe(1);
+  expect(store.recentWatchItems("2000-01-01")[0].publishedAt).toBe(NOW.toISOString());
+});

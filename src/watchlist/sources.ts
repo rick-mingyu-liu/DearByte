@@ -24,6 +24,9 @@ export type NewsItem = {
 const TIMEOUT_MS = 15_000;
 const MAX_BYTES = 3_000_000;
 const MAX_SUMMARY = 600;
+const MAX_TITLE = 200;
+/** A feed entry longer than this is skipped: real ones are a few KB, and it bounds the regex work. */
+const MAX_BLOCK = 100_000;
 const FEED_AGENT = "DearByte/0.1 (+https://github.com/dearbyte-labs/DearByte)";
 
 export class SourceError extends Error {}
@@ -36,6 +39,7 @@ async function get(url: string, headers: Record<string, string>, f: typeof fetch
     throw new SourceError(`${new URL(url).host} ${(err as Error).name === "TimeoutError" ? "timed out" : "could not connect"}`);
   }
   if (!res.ok) throw new SourceError(`${new URL(url).host} answered HTTP ${res.status}`);
+  if (Number(res.headers.get("content-length") ?? 0) > MAX_BYTES) throw new SourceError(`${new URL(url).host} sent more than ${MAX_BYTES} bytes`);
   const text = await res.text();
   if (text.length > MAX_BYTES) throw new SourceError(`${new URL(url).host} sent more than ${MAX_BYTES} bytes`);
   return text;
@@ -55,18 +59,55 @@ function decode(s: string): string {
   });
 }
 
+/** Drops HTML tags in one pass (a regex here goes quadratic on text full of unmatched "<"). */
+function stripTags(s: string): string {
+  let out = "";
+  let i = 0;
+  while (i < s.length) {
+    const open = s.indexOf("<", i);
+    if (open === -1) return out + s.slice(i);
+    const close = s.indexOf(">", open);
+    if (close === -1) return out + s.slice(i); // no tag after all: keep the rest as text
+    out += `${s.slice(i, open)} `;
+    i = close + 1;
+  }
+  return out;
+}
+
+/** The <item>/<entry> blocks, found by scanning forward once. */
+function blocks(xml: string, tag: string): string[] {
+  const out: string[] = [];
+  const closeTag = `</${tag}>`;
+  let i = 0;
+  for (;;) {
+    const open = xml.indexOf(`<${tag}`, i);
+    if (open === -1) return out;
+    const next = xml[open + tag.length + 1];
+    if (next !== ">" && next !== " " && next !== "\n" && next !== "\t" && next !== "\r") {
+      i = open + 1; // <itemfoo>, not <item>
+      continue;
+    }
+    const close = xml.indexOf(closeTag, open);
+    if (close === -1) return out; // unclosed: nothing after it can be trusted
+    if (close - open <= MAX_BLOCK) out.push(xml.slice(open, close + closeTag.length));
+    i = close + closeTag.length;
+  }
+}
+
+const clip = (s: string, max: number) => (s.length > max ? `${s.slice(0, max)}…` : s);
+
 /** Text content of the first <tag>, with CDATA unwrapped, HTML tags dropped and whitespace squeezed. */
 function tagText(xml: string, tag: string): string {
   const m = xml.match(new RegExp(`<${tag}(?:\\s[^>]*)?>([\\s\\S]*?)</${tag}>`, "i"));
   if (!m) return "";
   const raw = m[1].replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1");
   // Feeds escape the HTML in descriptions, so decode first, then drop the tags.
-  return decode(decode(raw).replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim();
+  return decode(stripTags(decode(raw))).replace(/\s+/g, " ").trim();
 }
 
 function atomLink(entry: string): string {
   const links = [...entry.matchAll(/<link\b([^>]*)\/?>/gi)].map((m) => m[1]);
-  const href = (attrs: string) => attrs.match(/\bhref\s*=\s*["']([^"']+)["']/i)?.[1];
+  const href = (attrs: string) => attrs.match(/\bhref\s*=\s*(?:"([^"]+)"|'([^']+)')/i)?.slice(1).find(Boolean);
   const alternate = links.find((a) => !/\brel\s*=/.test(a) || /\brel\s*=\s*["']alternate["']/i.test(a));
   return decode(href(alternate ?? links[0] ?? "") ?? "");
 }
@@ -74,11 +115,11 @@ function atomLink(entry: string): string {
 /** Parses an RSS 2.0 or Atom feed. Entries without a title, a link or a date are skipped. */
 export function parseFeed(xml: string, company: string): NewsItem[] {
   const atom = /<feed[\s>]/i.test(xml) && !/<rss[\s>]/i.test(xml);
-  const blocks = [...xml.matchAll(atom ? /<entry[\s>][\s\S]*?<\/entry>/gi : /<item[\s>][\s\S]*?<\/item>/gi)].map((m) => m[0]);
   const items: NewsItem[] = [];
-  for (const b of blocks) {
-    const title = tagText(b, "title");
-    const url = atom ? atomLink(b) : tagText(b, "link");
+  for (const b of blocks(xml, atom ? "entry" : "item")) {
+    const title = clip(tagText(b, "title"), MAX_TITLE);
+    const guid = tagText(b, "guid");
+    const url = atom ? atomLink(b) : tagText(b, "link") || (/^https?:\/\//.test(guid) ? guid : "");
     const date = atom ? tagText(b, "published") || tagText(b, "updated") : tagText(b, "pubDate") || tagText(b, "dc:date");
     const published = Date.parse(date);
     if (!title || !/^https?:\/\//.test(url) || !Number.isFinite(published)) continue;
@@ -86,11 +127,11 @@ export function parseFeed(xml: string, company: string): NewsItem[] {
     items.push({
       company,
       source: "newsroom",
-      externalId: (atom ? tagText(b, "id") : tagText(b, "guid")) || url,
+      externalId: (atom ? tagText(b, "id") : guid) || url,
       title,
       url,
       publishedAt: new Date(published).toISOString(),
-      summary: summary.length > MAX_SUMMARY ? `${summary.slice(0, MAX_SUMMARY)}…` : summary,
+      summary: clip(summary, MAX_SUMMARY),
     });
   }
   return items;
@@ -174,7 +215,7 @@ export function parseFilings(json: unknown, company: string, cik: number): NewsI
 
 export async function fetchFilings(cik: number, company: string, contactEmail: string, f: typeof fetch = fetch): Promise<NewsItem[]> {
   const url = `https://data.sec.gov/submissions/CIK${String(cik).padStart(10, "0")}.json`;
-  const text = await get(url, { "user-agent": `DearByte/0.1 ${contactEmail}`, accept: "application/json" }, f);
+  const text = await get(url, { "user-agent": `DearByte/0.1 ${contactEmail}`, accept: "application/json", "accept-encoding": "gzip, deflate" }, f);
   let json: unknown;
   try {
     json = JSON.parse(text);

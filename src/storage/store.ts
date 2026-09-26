@@ -98,9 +98,9 @@ CREATE TABLE IF NOT EXISTS approvals (
   decided_via TEXT
 );
 
--- Company news from official sources. (source, external_id) dedupes across
--- checks. status: new (not screened yet), old (already stale when first
--- seen), relevant / skipped (the screen's verdict, with its reason), sent.
+-- Company news from official sources. (company, source, external_id) dedupes across
+-- checks. status: new (not screened yet), old (stale), relevant / skipped
+-- (the screen's verdict, with its reason), sending (claimed by one check), sent.
 CREATE TABLE IF NOT EXISTS watch_items (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   company TEXT NOT NULL,
@@ -111,9 +111,9 @@ CREATE TABLE IF NOT EXISTS watch_items (
   published_at TEXT NOT NULL,
   summary TEXT NOT NULL,
   seen_at TEXT NOT NULL,
-  status TEXT NOT NULL CHECK (status IN ('new', 'old', 'relevant', 'skipped', 'sent')),
+  status TEXT NOT NULL CHECK (status IN ('new', 'old', 'relevant', 'skipped', 'sending', 'sent')),
   reason TEXT,
-  UNIQUE (source, external_id)
+  UNIQUE (company, source, external_id)
 );
 CREATE INDEX IF NOT EXISTS watch_items_status ON watch_items (status);
 `;
@@ -223,7 +223,7 @@ const toApproval = (r: ApprovalRow): Approval => ({
   decidedVia: r.decided_via,
 });
 
-export type WatchStatus = "new" | "old" | "relevant" | "skipped" | "sent";
+export type WatchStatus = "new" | "old" | "relevant" | "skipped" | "sending" | "sent";
 export type WatchItem = {
   id: number;
   company: string;
@@ -543,7 +543,7 @@ export class Store {
     seenAt: string,
   ): WatchItem[] {
     const insert = this.db.prepare(
-      "INSERT INTO watch_items (company, source, external_id, title, url, published_at, summary, seen_at, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (source, external_id) DO NOTHING RETURNING *",
+      "INSERT INTO watch_items (company, source, external_id, title, url, published_at, summary, seen_at, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (company, source, external_id) DO NOTHING RETURNING *",
     );
     const added: WatchItem[] = [];
     for (const i of items) {
@@ -559,6 +559,12 @@ export class Store {
 
   setWatchItemStatus(id: number, status: WatchStatus, reason?: string): void {
     this.db.prepare("UPDATE watch_items SET status = ?, reason = COALESCE(?, reason) WHERE id = ?").run(status, reason ?? null, id);
+  }
+
+  /** Moves items from one status to another only if they're still in it; returns the ids that moved. Two checks can't both claim an item. */
+  claimWatchItems(ids: number[], from: WatchStatus, to: WatchStatus): number[] {
+    const claim = this.db.prepare("UPDATE watch_items SET status = ? WHERE id = ? AND status = ? RETURNING id");
+    return ids.filter((id) => claim.get(to, id, from) !== undefined);
   }
 
   /** Newest first, published at or after `since`, optionally for one company (case-insensitive). */
