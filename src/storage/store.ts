@@ -116,6 +116,25 @@ CREATE TABLE IF NOT EXISTS watch_items (
   UNIQUE (company, source, external_id)
 );
 CREATE INDEX IF NOT EXISTS watch_items_status ON watch_items (status);
+
+-- What the wallet paid for: one row per approved purchase, paid or failed,
+-- with the on-chain transaction as the receipt. amount is in the token's
+-- smallest unit (USDC has 6 decimals).
+CREATE TABLE IF NOT EXISTS purchases (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  approval_id INTEGER NOT NULL UNIQUE,
+  at TEXT NOT NULL,
+  date TEXT NOT NULL,
+  url TEXT NOT NULL,
+  description TEXT NOT NULL,
+  amount TEXT NOT NULL,
+  network TEXT NOT NULL,
+  pay_to TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('paid', 'failed')),
+  tx TEXT,
+  error TEXT,
+  result TEXT
+);
 `;
 
 /**
@@ -250,6 +269,38 @@ const toWatchItem = (r: WatchRow): WatchItem => ({
   seenAt: r.seen_at,
   status: r.status,
   reason: r.reason,
+});
+
+export type Purchase = {
+  id: number;
+  approvalId: number;
+  at: string;
+  date: string;
+  url: string;
+  description: string;
+  amount: string;
+  network: string;
+  payTo: string;
+  status: "paid" | "failed";
+  tx: string | null;
+  error: string | null;
+  result: string | null;
+};
+type PurchaseRow = { id: number; approval_id: number; at: string; date: string; url: string; description: string; amount: string; network: string; pay_to: string; status: "paid" | "failed"; tx: string | null; error: string | null; result: string | null };
+const toPurchase = (r: PurchaseRow): Purchase => ({
+  id: r.id,
+  approvalId: r.approval_id,
+  at: r.at,
+  date: r.date,
+  url: r.url,
+  description: r.description,
+  amount: r.amount,
+  network: r.network,
+  payTo: r.pay_to,
+  status: r.status,
+  tx: r.tx,
+  error: r.error,
+  result: r.result,
 });
 
 export type UpsertResult = "inserted" | "updated" | "unchanged" | "blocked";
@@ -573,6 +624,27 @@ export class Store {
       ? this.db.prepare("SELECT * FROM watch_items WHERE published_at >= ? AND company = ? COLLATE NOCASE ORDER BY published_at DESC LIMIT ?").all(since, company, limit)
       : this.db.prepare("SELECT * FROM watch_items WHERE published_at >= ? ORDER BY published_at DESC LIMIT ?").all(since, limit);
     return (rows as WatchRow[]).map(toWatchItem);
+  }
+
+  recordPurchase(p: Omit<Purchase, "id">): Purchase {
+    const row = this.db
+      .prepare("INSERT INTO purchases (approval_id, at, date, url, description, amount, network, pay_to, status, tx, error, result) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *")
+      .get(p.approvalId, p.at, p.date, p.url, p.description, p.amount, p.network, p.payTo, p.status, p.tx, p.error, p.result) as PurchaseRow;
+    return toPurchase(row);
+  }
+
+  /** Total paid on `date` (YYYY-MM-DD), in the token's smallest unit. */
+  paidOn(date: string): bigint {
+    const rows = this.db.prepare("SELECT amount FROM purchases WHERE date = ? AND status = 'paid'").all(date) as Array<{ amount: string }>;
+    return rows.reduce((sum, r) => sum + BigInt(r.amount), 0n);
+  }
+
+  recentPurchases(limit: number): Purchase[] {
+    return (this.db.prepare("SELECT * FROM purchases ORDER BY id DESC LIMIT ?").all(limit) as PurchaseRow[]).map(toPurchase);
+  }
+
+  pendingApprovals(now: string): Approval[] {
+    return (this.db.prepare("SELECT * FROM approvals WHERE status = 'pending' AND expires_at > ? ORDER BY id").all(now) as ApprovalRow[]).map(toApproval);
   }
 
   markAlertDelivered(id: number): void {

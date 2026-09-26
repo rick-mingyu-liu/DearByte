@@ -4,6 +4,7 @@ import { resolveTiers, type Tier, type TierSettings } from "./agent/tiers.ts";
 import { DEFAULT_WEEKLY_CAP } from "./agent/usage.ts";
 import { PERSONAS, type Persona } from "./agent/persona.ts";
 import { resolveModel, type ModelSettings } from "./model/providers.ts";
+import { resolveWallet, type WalletConfig } from "./wallet/config.ts";
 
 export const ROOT = new URL("..", import.meta.url).pathname;
 
@@ -16,6 +17,8 @@ export type Config = {
   agentWeeklyCap: number;
   /** The dearbyte-bridge MCP address (it contains a secret), or null when health data isn't set up. */
   healthMcpUrl: string | null;
+  /** The testnet wallet: null when DEARBYTE_WALLET_KEY isn't set. */
+  wallet: WalletConfig | { problem: string } | null;
   /** Path of watchlist.json (it may not exist). */
   watchlistPath: string;
   /** Contact email SEC requires from automated clients; filings are skipped without it. */
@@ -60,6 +63,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     agentWeeklyCap: nonNegative(merged.DEARBYTE_WEEKLY_CAP, DEFAULT_WEEKLY_CAP),
     agentPersona: resolvePersona(merged.DEARBYTE_PERSONA),
     healthMcpUrl: merged.HEALTH_MCP_URL?.trim() || null,
+    wallet: resolveWallet(merged),
     watchlistPath: merged.DEARBYTE_WATCHLIST || join(ROOT, "watchlist.json"),
     secContact: /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(merged.SEC_CONTACT_EMAIL?.trim() ?? "") ? merged.SEC_CONTACT_EMAIL!.trim() : null,
     telegram: resolveTelegram(merged.TELEGRAM_BOT_TOKEN, merged.TELEGRAM_CHAT_ID),
