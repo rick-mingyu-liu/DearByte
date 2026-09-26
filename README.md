@@ -1,146 +1,181 @@
-<p align="center"><strong>简体中文</strong> · <a href="README.en.md">English</a></p>
+<p align="center"><strong>English</strong> · <a href="README.zh-CN.md">简体中文</a></p>
 
-<h1 align="center">DearByte · 小拜</h1>
+<h1 align="center">DearByte</h1>
 
-<p align="center"><strong>有点嘴硬，但会把你的话放在心上。</strong></p>
+<p align="center"><strong>A little attitude. A lot of care.</strong></p>
 
-<p align="center">一个有自己脾气的 AI 聊天伙伴。<br>记住你说过的小事，偶尔主动问候，也尊重你想安静的时候。</p>
+<p align="center">A self-hosted personal agent that knows how you slept, watches what you care about, and only spends within limits you approve.</p>
 
 <p align="center">
-<a href="https://github.com/rick-mingyu-liu/DearByte/stargazers"><img src="https://img.shields.io/github/stars/rick-mingyu-liu/DearByte?style=flat" alt="GitHub Stars"></a>
-<img src="https://img.shields.io/badge/status-experimental-orange" alt="实验原型">
+<a href="https://github.com/dearbyte-labs/DearByte/stargazers"><img src="https://img.shields.io/github/stars/dearbyte-labs/DearByte?style=flat" alt="GitHub Stars"></a>
+<img src="https://img.shields.io/badge/status-experimental-orange" alt="Status: experimental">
 <img src="https://img.shields.io/badge/Node.js-26%2B-339933" alt="Node.js 26+">
 <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT"></a>
 </p>
 
-<p align="center"><a href="#快速开始">快速开始</a> · <a href="docs/guide.zh-CN.md">使用指南</a> · <a href="#数据与隐私">数据与隐私</a> · <a href="#参与开发">参与开发</a></p>
+DearByte is a personal agent you run yourself. It:
 
-小拜有点傲娇，也很细心。她会接你的玩笑，认真听你说烦心事；开启记忆后，还能记住你提过的偏好和日程，让下一次聊天接得上上一次。
+- **Knows you.** Your Apple Watch health data, your calendar, and what you've asked it to remember.
+- **Watches for you.** When your body and your schedule don't match, it says so ("you slept 5 hours and have leg day at 7; go light"). It also tells you about big news from the companies you follow within minutes, not weeks.
+- **Spends for you, within limits.** It can propose buying a service. Code enforces the caps, and nothing is paid until you approve.
 
-DearByte 目前是一个可以在终端运行、也可以实验性接入微信的 AI 陪伴原型。文档提供简体中文与英文两个版本；**当前角色和对话设计以中文为主**。
+It's a friend and a coach, not an assistant reading a script, and never a romantic partner. It's not a doctor either: it talks about sleep, energy and pacing, and points you to a real one for anything medical.
 
-如果你也喜欢这样的聊天伙伴，欢迎点个 ⭐ Star，回来看看小拜的新变化。
+## Why DearByte
 
-## 和小拜聊点什么
+Most AI assistants run on someone else's servers, and none of them know how you slept. DearByte is built around four choices:
 
-| 你想要的体验 | 小拜现在能做什么 |
+- **Yours.** Self-hosted and open source. Your memory and logs live in a folder on your machine, and your health data goes through a Worker in your own Cloudflare account.
+- **Body-aware.** Suggestions account for your sleep, recovery and schedule, measured against *your* normal, not a generic target.
+- **Careful with money.** The agent can only propose purchases. Caps and allowlists are enforced in code, you approve every payment, and every payment gets a receipt.
+- **Honest about cost.** Every model call is logged with its price, a weekly cap stops spending, and cheap models do the bulk work while a strong model makes the calls that matter.
+
+## Status
+
+DearByte is early and built in the open. What works today and what's coming:
+
+| Part | Status |
 | --- | --- |
-| 下班后随便聊两句 | 用简短、有个性的消息回应，支持分条发送和自然的回复间隔 |
-| 下次不用从头交代 | 开启长期记忆后，记住有原话依据的小事，并整理较早的对话 |
-| 有人记得重要的一天 | 开启记忆和主动消息后，可在记住的考试、面试等事件当天问候 |
-| 分享今天拍的照片 | 支持图片对话；微信模式需要额外配置本地图片目录 |
-| 偶尔收到一句问候 | 支持早安、久未聊天的问候和日常主动消息，也有限频与安静时段 |
-| 今天想一个人待着 | 可以关闭主动消息；表达想安静时，会暂停主动问候 3 天 |
-| 自己决定留下什么 | 查看、删除、导出记忆，或关闭长期记忆；长期记忆默认关闭 |
+| Agent core: tool loop, validated tools, Claude or DeepSeek as "brain" and "worker" tiers | **Works**, tested offline and with live DeepSeek runs; no real tools connected yet |
+| Spending controls: per-run and weekly caps, a usage log of every model call | **Works** |
+| English persona, plus the opt-in Chinese Xiaobai pack | **Works** |
+| Chat companion in the terminal and in WeChat (Xiaobai, Chinese) with memory and proactive check-ins | **Works**, see [the companion](#the-chinese-companion-xiaobai) |
+| Apple Watch and Apple Health data, through [dearbyte-bridge](https://github.com/dearbyte-labs/dearbyte-bridge) | **In progress** |
+| Calendar awareness (Apple Calendar, via the same iPhone app) | Planned |
+| Caution alerts and a morning brief that combine sleep, heart data and your schedule | Planned |
+| Telegram for alerts and Approve/Reject buttons | Planned |
+| Company watchlist: official newsroom feeds and SEC filings | Planned |
+| Testnet wallet: the agent proposes a paid service, you approve, it pays within a cap, and you get a receipt | Planned |
 
-## 快速开始
+## Roadmap
 
-需要 **Node.js 26+**（用 nvm 的话，在项目目录里 `nvm use` 即可）。先在终端认识小拜：
+**Phase 1: the first demo** (target: 2026-09-28)
+- [x] Agent core: tool loop, Claude/DeepSeek tiers, spending caps, usage log, English persona
+- [ ] Apple Watch and Apple Health data through [dearbyte-bridge](https://github.com/dearbyte-labs/dearbyte-bridge), and `npm run agent` on real data
+- [ ] Daily health snapshots, so DearByte learns your normal sleep, resting heart rate and HRV
+- [ ] Caution alerts and a morning brief that combine your body and your calendar, with quiet hours and a daily limit
+- [ ] Telegram for alerts, and Approve/Reject buttons
+- [ ] Company watchlist: official newsroom feeds and SEC filings, with relevance filtered against what you care about
+- [ ] Testnet wallet demo: the agent proposes a paid service, you approve, it pays in test USDC within a cap, and you get a receipt
+
+**Phase 2: daily use, measured**
+- Two weeks of real use with feedback on every alert; measure precision, missed events, delay and cost per month
+- Calendar from the iPhone app (EventKit), an English app UI, and more news sources
+- Approving purchases from the Apple Watch (needs a paid Apple Developer account)
+
+**Later**
+- A hosted DearByte for people who don't want to run it themselves
+- A marketplace where solo developers and small companies sell useful services to agents, with DearByte as the first buyer. The agent, the bridge and the seller SDK stay open source.
+
+## Quick start
+
+Requires **Node.js 26+** (with nvm, run `nvm use` in the repo).
 
 ```bash
-git clone https://github.com/rick-mingyu-liu/DearByte.git
+git clone https://github.com/dearbyte-labs/DearByte.git
 cd DearByte
 npm install
+npm test
 ```
 
-在项目根目录创建 `.env`，填入你的 API 密钥（该文件已被 Git 忽略）：
+Create `.env` in the project root. It's ignored by Git:
 
 ```dotenv
-DEEPSEEK_API_KEY=你的_API_密钥
+DEEPSEEK_API_KEY=your_key
 ```
 
-也可以换成 OpenAI、Claude、Gemini、通义千问、Kimi、GLM、OpenRouter 或本地 Ollama，见[使用指南的配置](docs/guide.zh-CN.md#配置)。每条回复默认最多花 1 美元。
+Run the agent once on sample data. This costs about $0.001:
 
 ```bash
-npm run companion
+npm run agent:smoke
+npm run agent:usage
 ```
 
-没有密钥也可以运行 `npm run companion -- --fake`，检查本地流程。该模式不调用模型，回复会标注为模拟内容。
+`agent:smoke` asks "How did I sleep, and should I still do leg day tonight?" against two sample tools and prints each step, the tool calls and the answer. `agent:usage` shows what that cost. The command-line agent on your real data (`npm run agent`) comes with the Apple Watch integration.
 
-| 命令 | 作用 |
+## Configuration
+
+All settings go in `.env`.
+
+| Setting | Default | What it does |
+| --- | --- | --- |
+| `DEEPSEEK_API_KEY` | — | Key for DeepSeek, the default model for both tiers |
+| `ANTHROPIC_API_KEY` | — | Key for Claude; needed when a tier uses `anthropic:` |
+| `DEARBYTE_BRAIN` | `deepseek:deepseek-flash` | The model for judgment calls: caution alerts, news analysis, anything about money. For demos: `anthropic:claude-opus-5-5` |
+| `DEARBYTE_BRAIN_EFFORT` | the model's default | `low` to `max`; set `high` for Claude Opus 5.5 |
+| `DEARBYTE_WORKER` | `deepseek:deepseek-flash` | The model for high-volume, easy-to-check work: filtering, summaries |
+| `DEARBYTE_PERSONA` | `default` | `default` (English DearByte) or `xiaobai` (Chinese) |
+| `DEARBYTE_WEEKLY_CAP` | `5` | USD the agent may spend on model calls in any 7 days; `0` turns the cap off |
+
+A model without a known price is refused, so the spending caps always work.
+
+## How it works
+
+```
+you ─ CLI / Telegram ─┐
+                      ▼
+             agent loop ──── model tiers: brain (judgment) · worker (bulk)
+                      │           │
+                      │           └─ usage log + weekly cap
+                      ▼
+            validated tools ─┬─ health and sleep (dearbyte-bridge, MCP)
+                             ├─ calendar
+                             ├─ memory
+                             ├─ company watchlist
+                             └─ propose_purchase ──► your approval ──► payment code
+```
+
+- **Our own agent loop** (`src/agent/`): the model proposes tool calls, and every call is checked against a schema before it runs. Tool errors go back to the model instead of crashing the loop. No tools run after a refusal or a cut-off call, and each run stops at 8 steps or $0.50.
+- **Any model, one interface:** Claude and DeepSeek both go through Anthropic's SDK (DeepSeek through its Anthropic-compatible endpoint). Claude-only features, such as adaptive thinking and refusal fallbacks, are sent only to Claude.
+- **Approvals will live outside the model** (the design for the wallet, not built yet). The model can only propose a purchase. Payment code runs only when you approve, with caps and a seller allowlist checked in code.
+- **Prompts stay cacheable:** the system prompt is identical on every request, and the current time goes into the message instead.
+
+## Data and privacy
+
+- **Your data stays on your machine** in the Git-ignored `data/` folder: memory, usage log, and chat history.
+- **What leaves:** the context of each request goes to the model provider you choose (DeepSeek or Anthropic). Health data goes from your phone to *your own* Cloudflare Worker (dearbyte-bridge), and from there only to clients you give its secret MCP address to, such as DearByte.
+- **Memory is inspectable and deletable,** and every stored fact quotes your own words as evidence.
+- **Health:** DearByte uses summaries (last night's sleep, your 7-day average), not raw sample history. It isn't a medical device.
+
+## Personas
+
+`default` is DearByte in English: warm, a little cheeky, and never a partner. It gives US crisis resources (988, 911) if anyone is in danger. `xiaobai` is an opt-in Chinese persona with the tsundere 小拜 tone and China's crisis numbers. Both share the same rules: facts only from tools, missing data reported as unknown, and plain wording for anything involving money. The files are in `prompts/agent/`.
+
+## The Chinese companion: Xiaobai
+
+DearByte started as 小拜 (Xiaobai), a Chinese chat companion with its own personality. She has controllable memory and proactive check-ins, and runs in the terminal or, experimentally, through WeChat. That mode is unchanged:
+
+```bash
+npm run companion            # terminal chat
+npm run companion -- --fake  # no model calls; replies labelled fake
+```
+
+The WeChat connection drives WeChat for Mac through macOS Accessibility. That isn't allowed by Tencent's terms and the account may be restricted, so use a test account, never your main one. Setup is in the [Chinese README](README.zh-CN.md) and the [operations guide](docs/guide.en.md).
+
+## Documentation
+
+| Document | Contents |
 | --- | --- |
-| `/memory on` / `/memory off` | 开启或关闭长期记忆 |
-| `/memory` | 查看记忆 |
-| `/memory forget <id>` | 删除一条记忆 |
-| `/memory export` | 导出记忆 |
-| `/img <path> [配文]` | 发送本地图片 |
-| `/history clear` | 清除聊天历史，保留记忆 |
-| `/help` / `/quit` | 查看帮助 / 退出 |
+| [Operations guide](docs/guide.en.md) | Companion commands, proactive messaging, alerts, configuration, repository layout |
+| [How it works](docs/how-it-works.md) | The companion's reply pipeline, memory and storage |
+| [Project plan](docs/plan.md) | Decisions, progress and milestones |
+| [Improvements](docs/improvements.md) | Areas for future work |
+| [中文说明](README.zh-CN.md) | 小拜的中文介绍和快速开始 |
+| [Contributing](CONTRIBUTING.md) | Read before opening a PR; report security issues through [SECURITY.md](SECURITY.md) |
 
-### 在微信里聊天
-
-微信接入通过 macOS 辅助功能操作桌面客户端，当前针对 **WeChat for Mac 4.x（或 3.8.4）、英文界面、单个一对一聊天**。4.x 下看图需要“屏幕与系统录音”权限。需要辅助功能权限和 Swift；图片另需配置目录。
-
-这是一条实验性演示路径，存在账号受限风险。请使用测试账号。配置步骤、草稿模式、暂停与恢复见[中文使用指南](docs/guide.zh-CN.md#微信接入)。
-
-#### 设置联系人白名单
-
-在登录小拜账号的 Mac 微信中，打开希望小拜回复的一对一聊天。将聊天顶部显示的完整名称填入命令（不是微信号）：
-
-```bash
-npm run dearbyte -- --chat "Alex Zhang" --draft
-```
-
-首次运行会核对当前聊天名称，并创建 `data/contacts.json`。草稿模式只生成回复，不发送；确认设置正确后，退出程序，再启动自动回复：
-
-```bash
-npm run dearbyte
-```
-
-如果同一联系人有不同的备注或昵称，编辑 `data/contacts.json`，把可能显示的名称加入 `names`：
-
-```json
-{
-  "contacts": [
-    {
-      "id": "me",
-      "names": ["张三", "Alex Zhang"]
-    }
-  ]
-}
-```
-
-将示例名称替换为**同一个人**的实际显示名称，`id` 保留 `me` 即可。保存后重启程序。文件已存在时，`--chat` 不会追加或覆盖名单，需要直接编辑文件。
-
-**当前仅支持一个联系人。** 不要把不同的人填成别名，也不要添加第二个联系人对象；历史与记忆尚未按联系人隔离。该文件已被 Git 忽略。更多说明见[联系人设置指南](docs/guide.zh-CN.md#设置允许回复的联系人)。
-
-## 数据与隐私
-
-- **长期记忆默认关闭。** 开启后可随时查看、删除或导出。聊天历史与长期记忆是两回事，关闭记忆不会停止保存聊天历史。
-- **本地保存，云端生成。** 历史、记忆、摘要和设置保存在被 Git 忽略的 `data/` 中。生成回复时，相关对话上下文会发送给你配置的模型服务商（默认 DeepSeek）；图片仅用于当前轮次。
-- **历史默认保留 30 天。** 开启记忆时，较早的聊天先纳入摘要再删除。清除历史不会同时清除记忆。
-- **微信仍由腾讯传输。** 删除本地数据不会删除已经发出的微信消息，也不会删除模型服务商可能保留的数据。
-
-## 当前进展
-
-已实现终端聊天、可控记忆、图片输入、主动消息和实验性微信接入。微信文字与图片流程已于 **2026-09-24** 完成实机测试。
-
-当前微信模式只支持一个联系人；语音、视频、文件和表情包不能被直接理解。小拜是 AI，不是真人；危机信号检测用于调整回复，不能代替专业帮助或联系紧急服务。
-
-## 参与开发
+## Contributing
 
 ```bash
 npm test
 npm run typecheck
 ```
 
-欢迎通过 [Issues](https://github.com/rick-mingyu-liu/DearByte/issues) 反馈问题、讨论想法，或提交改进。复现问题时请去掉聊天中的个人信息和 API 密钥。
+Use [Issues](https://github.com/dearbyte-labs/DearByte/issues) to report problems or discuss ideas. Remove personal data, health data and API keys from reproductions.
 
-| 文档 | 内容 |
-| --- | --- |
-| [中文使用指南](docs/guide.zh-CN.md) | 安装、微信接入、常用配置与控制 |
-| [完整运行参考（英文）](docs/guide.en.md) | 全部命令、主动消息规则、通知、配置和目录结构 |
-| [工作原理（英文）](docs/how-it-works.md) | 回复生成、记忆和存储 |
-| [项目计划（英文）](docs/plan.md) | 决策、进展和里程碑 |
-| [改进方向（英文）](docs/improvements.md) | 后续可以改进的地方 |
-| [参与贡献（英文）](CONTRIBUTING.md) | 提 PR 前请先看；安全问题见 [SECURITY.md](SECURITY.md) |
+## Acknowledgments
 
-## 致谢
+Health data comes from [dearbyte-bridge](https://github.com/dearbyte-labs/dearbyte-bridge), based on [apple-watch-health-mcp](https://github.com/ice-star-blue/apple-watch-health-mcp) (MIT). Xiaobai's conversation design draws on ideas from [狗头军师](https://github.com/shengjidaguai-china/goutoujunshi), [咫尺](https://github.com/oaa529/zhichi) and [前任.skill](https://github.com/perkfly/ex-skill); see [upstream provenance](docs/upstream-provenance.md).
 
-小拜的对话设计参考了 [狗头军师](https://github.com/shengjidaguai-china/goutoujunshi)、[咫尺](https://github.com/oaa529/zhichi) 和 [前任.skill](https://github.com/perkfly/ex-skill) 的部分思路。具体来源、采用方式和差异见[来源说明（英文）](docs/upstream-provenance.md)。
+## License
 
-## 许可证
-
-[MIT](LICENSE)。借鉴的上游项目也都是 MIT 许可，来源和改编方式见[来源说明（英文）](docs/upstream-provenance.md)。
-
-本项目通过非官方方式操作微信，不符合腾讯的使用规则，账号可能被限制。仅供个人实验，请使用测试账号，不要用主账号运行。
+[MIT](LICENSE). The upstream projects it draws on are MIT-licensed too.

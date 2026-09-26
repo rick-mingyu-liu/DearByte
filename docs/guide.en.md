@@ -1,4 +1,4 @@
-[简体中文使用指南](guide.zh-CN.md) · [English README](../README.en.md)
+[简体中文使用指南](guide.zh-CN.md) · [README](../README.md)
 
 # DearByte · 小拜 — Operations guide
 
