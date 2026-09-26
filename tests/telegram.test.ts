@@ -115,13 +115,34 @@ test("inbox: approve and reject buttons decide the approval and show the outcome
   const { d, store, log } = inbox();
   const a = proposeApproval(store, { kind: "test", summary: "Buy coffee, $4", payload: null }, T0);
   expect(await handleUpdate(d, tap(`ap:${a.id}:y`))).toBe(`approval ${a.id}: approved`);
-  expect(log).toContain("answer: ✅ Approved. Test done.");
+  expect(log).toContain("answer: Working on it…");
   expect(log.find((l) => l.startsWith("edit 50"))).toContain("Buy coffee, $4");
   expect(store.approval(a.id)).toMatchObject({ status: "approved", decidedVia: "telegram" });
 
   const b = proposeApproval(store, { kind: "test", summary: "Buy tea", payload: null }, T0);
   expect(await handleUpdate(d, tap(`ap:${b.id}:n`))).toBe(`approval ${b.id}: rejected`);
-  expect(log).toContain("answer: ❌ Rejected. Nothing was done.");
+  expect(log.at(-1)).toContain("❌ Rejected. Nothing was done.");
+
+  // A second tap on an already-decided request says so as a message; nothing runs again.
+  expect(await handleUpdate(d, tap(`ap:${a.id}:y`))).toBe(`approval ${a.id}: already_decided`);
+  expect(log.at(-1)).toBe(`send ${ME}: Already approved.`);
+});
+
+test("inbox: a failing tap answer doesn't stop the approval, and a failed edit still tells the user", async () => {
+  const { d, store, log } = inbox();
+  d.bot.answerCallback = async () => Promise.reject(new Error("query is too old"));
+  d.bot.replaceText = async () => Promise.reject(new Error("message can't be edited"));
+  const a = proposeApproval(store, { kind: "test", summary: "x", payload: null }, T0);
+  expect(await handleUpdate(d, tap(`ap:${a.id}:y`))).toBe(`approval ${a.id}: approved`);
+  expect(log).toEqual([`send ${ME}: ✅ Approved. Test done.`]);
+});
+
+test("poll loop: a rejected token stops it instead of retrying forever", async () => {
+  const { d } = inbox();
+  const lines: string[] = [];
+  const bot = { ...d.bot, updates: async () => Promise.reject(new TelegramError("Telegram getUpdates: the bot token was rejected", 401)) };
+  await pollInbox({ ...d, bot }, { signal: new AbortController().signal, log: (l) => lines.push(l) });
+  expect(lines).toEqual(["Telegram getUpdates: the bot token was rejected; stopped listening to Telegram"]);
 });
 
 test("inbox: only the user's chat counts", async () => {
@@ -167,7 +188,7 @@ test("poll loop: advances the offset, survives a failed call and a failing updat
     send: async () => Promise.reject(new Error("network")),
   };
   await pollInbox({ ...d, bot }, { signal: stop.signal, log: (l) => lines.push(l) });
-  expect(offsets).toEqual([0, 0, 12]);
+  expect(offsets).toEqual([0, 0, 12, 12]); // the last call confirms what was handled
   expect(lines).toEqual(["Telegram getUpdates: busy; retrying in 0s", "feedback for unknown alert 1", "telegram update 11 failed: network"]);
 });
 
@@ -194,7 +215,7 @@ test("weekly cap: a fixed notice once a day instead of silence", async () => {
     now: () => T0,
   };
   expect(await runCautionCheck(d)).toMatchObject({ sent: true, kind: "notice" });
-  expect(sent).toEqual([{ body: CAP_NOTICE, alertId: store.alertsOn("2026-09-26")[0].id }]);
+  expect(sent).toEqual([{ body: CAP_NOTICE, alertId: undefined }]); // no rating buttons on a notice
   expect(await runCautionCheck(d)).toMatchObject({ sent: false, reason: "weekly spending cap reached" });
   expect(sent).toHaveLength(1);
 

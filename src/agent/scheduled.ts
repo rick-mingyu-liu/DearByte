@@ -94,7 +94,8 @@ async function unwritten(d: ScheduledDeps, now: Date, c: Composed & { text: null
 /** Stores the message under `kind` with the rules it covers (`raised`, default: the triggers' kinds), then sends it. */
 async function deliver(d: ScheduledDeps, now: Date, kind: string, title: string, text: string, triggers: Trigger[], raised = triggers.map((t) => t.kind as string)): Promise<Outcome> {
   const id = d.store.recordAlert({ at: now.toISOString(), date: localDate(now, d.timeZone), kind, triggers: raised, text, delivered: false });
-  const delivered = await d.notify(title, text, { alertId: id }).catch(() => false);
+  // Notices are about DearByte itself, not advice, so they get no rating buttons.
+  const delivered = await d.notify(title, text, kind === "notice" ? {} : { alertId: id }).catch(() => false);
   if (delivered) d.store.markAlertDelivered(id);
   return { sent: true, kind, text, triggers, delivered };
 }

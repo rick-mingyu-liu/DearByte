@@ -175,8 +175,12 @@ async function watch(): Promise<void> {
   if (telegram) {
     // Button taps are handled alongside the checks, for as long as watch runs.
     const stop = new AbortController();
-    process.once("SIGINT", () => (stop.abort(), process.exit(0)));
-    void pollInbox(inboxDeps(), { signal: stop.signal, log: (line) => console.log(dim(`telegram: ${line}`)) });
+    const listening = pollInbox(inboxDeps(), { signal: stop.signal, log: (line) => console.log(dim(`telegram: ${line}`)) });
+    // Ctrl-C lets a tap that's being handled (an approval running) finish before exiting.
+    process.once("SIGINT", () => {
+      stop.abort();
+      void listening.finally(() => process.exit(0));
+    });
     console.log(dim("Telegram: sending alerts and listening for button taps."));
   }
   for (;;) {
