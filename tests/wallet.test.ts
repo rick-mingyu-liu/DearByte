@@ -105,7 +105,7 @@ test("purchase: proposed, approved, paid once, with a receipt", async () => {
   expect(s.paid).toEqual([]); // proposing pays nothing
 
   const decision = await decide(store, handlers, 1, "approve", { now: NOW, via: "test" });
-  expect(decision).toMatchObject({ status: "approved", result: "Paid $0.05 for A recovery plan. Receipt #1, transaction https://sepolia.basescan.org/tx/0xabc123." });
+  expect(decision).toMatchObject({ status: "approved", result: "Paid $0.05 for \"A recovery plan\". Receipt #1, transaction https://sepolia.basescan.org/tx/0xabc123." });
   expect(await decide(store, handlers, 1, "approve", { now: NOW, via: "test" })).toMatchObject({ status: "already_decided" });
   expect(s.paid).toHaveLength(1);
   expect(store.recentPurchases(5)).toMatchObject([{ approvalId: 1, status: "paid", amount: "50000", tx: "0xabc123" }]);

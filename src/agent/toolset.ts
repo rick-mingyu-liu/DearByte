@@ -18,11 +18,12 @@ export function memoryTools(store: Pick<Store, "memoryEnabled" | "activeFacts">,
     defineTool({
       name: "read_memory",
       description:
-        "What the user has told DearByte to remember: preferences, people, upcoming events, how they like to be spoken to. Each fact has a category and, for events, a date.",
+        "What the user has told DearByte to remember: preferences, people, upcoming events. Each fact has a category and, for events, a date.",
       input: z.object({}),
       run: async () => {
         if (!store.memoryEnabled()) return JSON.stringify({ status: "off", message: "Long-term memory is turned off, so nothing is remembered." });
-        const facts = store.activeFacts().map((f) => ({
+        // Style facts are how 小拜, the companion, talks to the user (nicknames, language, tone). They set her voice, not the agent's.
+        const facts = store.activeFacts().filter((f) => f.category !== "style").map((f) => ({
           category: f.category,
           fact: f.value,
           ...(f.eventDate ? { date: f.eventDate } : {}),

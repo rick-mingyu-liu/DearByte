@@ -20,6 +20,32 @@ Each step works without the ones after it. Run `npm run agent -- status` at any 
 
 Secrets (`HEALTH_MCP_URL`, `TELEGRAM_BOT_TOKEN`, `DEARBYTE_WALLET_KEY`, API keys) go only in `.env`, which Git ignores. Never paste them into chat, issues, commits or screenshots. `wallet new` prints only the address, never the key.
 
+## The demo
+
+```bash
+npm run demo                 # each part uses your real setup when it exists, sample data when it doesn't
+npm run demo -- --sample     # sample data everywhere: a rehearsal that never depends on your setup
+npm run demo -- --testnet    # pay on Base Sepolia for real (needs DEARBYTE_WALLET_KEY with test USDC, and SELLER_PAY_TO)
+npm run demo -- --no-pause   # don't wait for Enter between parts
+```
+
+The demo runs three parts, pausing between them:
+1. **Knows you:** the morning brief, then "Should I still do leg day tonight?", answered with the health tools.
+2. **Watches for you:** one watchlist check. The worker screens each item and says why; the brain writes the message.
+3. **Spends for you:** the agent proposes buying a recovery plan from the example seller, which the demo starts on port 4029. You approve by typing yes, or with the button in Telegram. It pays and prints the receipt, then the agent tells you what it bought.
+
+Without your own setup, a part uses sample data, and says so on screen and in Telegram:
+- health: a made-up week of about 7 hours a night, then a 5h10m night;
+- news: the newsroom of a made-up company;
+- payment: the seller in dev mode, which checks the signed payment but moves nothing on chain.
+
+The demo records everything in `data/demo.sqlite`, recreated on each run, so your real alerts, news history and receipts are untouched, and a second take isn't blocked by the daily limits. Model spending still goes in the usage log and counts toward the weekly cap: a run costs about $0.005 on DeepSeek.
+
+Two exceptions and one caution:
+- With `--testnet`, purchases and their receipts go to your real database, so real test spending counts toward your daily limit.
+- `--sample` doesn't read your real memory either.
+- If Telegram is set up, stop `npm run agent -- watch` while the demo runs. Otherwise both would answer the same button taps. The demo ignores taps left over from earlier runs.
+
 ## Commands
 
 ```bash
@@ -36,6 +62,7 @@ npm run agent -- wallet [new]             # address, balance, limits, recent pur
 npm run agent -- approvals                # requests waiting for your yes
 npm run agent -- approve N | reject N     # answer one in the terminal
 npm run seller [-- --dev]                 # the example x402 seller on http://127.0.0.1:4021
+npm run demo                              # the three-part demo (see above)
 npm run agent:usage                       # what every model call cost
 ```
 
