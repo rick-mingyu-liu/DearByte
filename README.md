@@ -21,6 +21,15 @@ DearByte is a personal agent you run yourself. It:
 
 It's a friend and a coach, not an assistant reading a script, and never a romantic partner. It's not a doctor either: it talks about sleep, energy and pacing, and points you to a real one for anything medical.
 
+## Why DearByte
+
+Most AI assistants run on someone else's servers, and none of them know how you slept. DearByte is built around four choices:
+
+- **Yours.** Self-hosted and open source. Your memory and logs live in a folder on your machine, and your health data goes through a Worker in your own Cloudflare account.
+- **Body-aware.** Suggestions account for your sleep, recovery and schedule, measured against *your* normal, not a generic target.
+- **Careful with money.** The agent can only propose purchases. Caps and allowlists are enforced in code, you approve every payment, and every payment gets a receipt.
+- **Honest about cost.** Every model call is logged with its price, a weekly cap stops spending, and cheap models do the bulk work while a strong model makes the calls that matter.
+
 ## Status
 
 DearByte is early and built in the open. What works today and what's coming:
@@ -37,6 +46,26 @@ DearByte is early and built in the open. What works today and what's coming:
 | Telegram for alerts and Approve/Reject buttons | Planned |
 | Company watchlist: official newsroom feeds and SEC filings | Planned |
 | Testnet wallet: the agent proposes a paid service, you approve, it pays within a cap, and you get a receipt | Planned |
+
+## Roadmap
+
+**Phase 1: the first demo** (target: 2026-09-28)
+- [x] Agent core: tool loop, Claude/DeepSeek tiers, spending caps, usage log, English persona
+- [ ] Apple Watch and Apple Health data through [dearbyte-bridge](https://github.com/dearbyte-labs/dearbyte-bridge), and `npm run agent` on real data
+- [ ] Daily health snapshots, so DearByte learns your normal sleep, resting heart rate and HRV
+- [ ] Caution alerts and a morning brief that combine your body and your calendar, with quiet hours and a daily limit
+- [ ] Telegram for alerts, and Approve/Reject buttons
+- [ ] Company watchlist: official newsroom feeds and SEC filings, with relevance filtered against what you care about
+- [ ] Testnet wallet demo: the agent proposes a paid service, you approve, it pays in test USDC within a cap, and you get a receipt
+
+**Phase 2: daily use, measured**
+- Two weeks of real use with feedback on every alert; measure precision, missed events, delay and cost per month
+- Calendar from the iPhone app (EventKit), an English app UI, and more news sources
+- Approving purchases from the Apple Watch (needs a paid Apple Developer account)
+
+**Later**
+- A hosted DearByte for people who don't want to run it themselves
+- A marketplace where solo developers and small companies sell useful services to agents, with DearByte as the first buyer. The agent, the bridge and the seller SDK stay open source.
 
 ## Quick start
 
